@@ -11,6 +11,7 @@ from pi_view_simulation import (
     compute_view_vector,
     default_pi_setup,
     normalize_pi_setup,
+    perpendicular_square_corners,
     to_float,
 )
 
@@ -26,7 +27,6 @@ TRAJECTORY_JSON = (
 )
 
 SCRIPT_TIMEOUT_SECONDS = 300
-VIEW_VECTOR_LENGTH = 180.0
 
 app = dash.Dash(__name__)
 server = app.server
@@ -158,6 +158,7 @@ def build_figure(
             yaw_deg = to_float(pi.get("yaw_deg", pi.get("view_horizontal_deg")), 0.0)
             pitch_deg = to_float(pi.get("pitch_deg", pi.get("view_vertical_deg")), 0.0)
             roll_deg = to_float(pi.get("roll_deg"), 0.0)
+            view_length = to_float(pi.get("view_length"), 400.0)
             pi_x.append(to_float(pi.get("x"), 0.0))
             pi_y.append(to_float(pi.get("y"), 0.0))
             pi_z.append(to_float(pi.get("z"), 0.0))
@@ -168,7 +169,7 @@ def build_figure(
                 yaw_deg,
                 pitch_deg,
                 roll_deg,
-                VIEW_VECTOR_LENGTH,
+                view_length,
             )
             view_u.append(view_x)
             view_v.append(view_y)
@@ -195,11 +196,15 @@ def build_figure(
         )
 
         for pi, x, y, z, u, v, w in zip(pi_setup, pi_x, pi_y, pi_z, view_u, view_v, view_w):
+            view_end_x = x + u
+            view_end_y = y + v
+            view_end_z = z + w
+
             fig.add_trace(
                 go.Scatter3d(
-                    x=[x, x + u],
-                    y=[y, y + v],
-                    z=[z, z + w],
+                    x=[x, view_end_x],
+                    y=[y, view_end_y],
+                    z=[z, view_end_z],
                     mode="lines",
                     line=dict(width=3, color="#f59e0b"),
                     name=f"{pi.get('name', pi.get('id', 'Pi'))} Blick",
@@ -214,6 +219,35 @@ def build_figure(
                         "Y: %{y}<br>"
                         "Z: %{z}<extra></extra>"
                     ),
+                )
+            )
+
+            plane_side_length = 600.0
+            square_corners = perpendicular_square_corners(
+                view_end_x,
+                view_end_y,
+                view_end_z,
+                u,
+                v,
+                w,
+                plane_side_length,
+            )
+
+            fig.add_trace(
+                go.Mesh3d(
+                    x=[corner[0] for corner in square_corners],
+                    y=[corner[1] for corner in square_corners],
+                    z=[corner[2] for corner in square_corners],
+                    i=[0, 0],
+                    j=[1, 2],
+                    k=[2, 3],
+                    color="#f59e0b",
+                    opacity=0.22,
+                    flatshading=True,
+                    name=f"{pi.get('name', pi.get('id', 'Pi'))} Fläche",
+                    showlegend=False,
+                    hoverinfo="skip",
+                    legendgroup="setup",
                 )
             )
 
@@ -259,7 +293,7 @@ app.layout = html.Div(
     children=[
         # Download-Komponente
         dcc.Download(id="download-json"),
-        
+
         html.Div(
             className="header",
             children=[
@@ -294,6 +328,12 @@ app.layout = html.Div(
                         dcc.Tab(
                             label="Daten",
                             value="tab-2",
+                            className="custom-tab",
+                            selected_className="custom-tab--selected",
+                        ),
+                        dcc.Tab(
+                            label="Kameras",
+                            value="tab-3",
                             className="custom-tab",
                             selected_className="custom-tab--selected",
                         ),
@@ -399,14 +439,58 @@ app.layout = html.Div(
                                         html.Div(
                                             className="cardTitle",
                                             children=[
-                                                html.H2("Pi-Setup"),
-                                                html.Span("editierbar", className="badge"),
+                                                html.H2("Datenquelle"),
+                                                html.Span(
+                                                    "JSON-Ausgabe",
+                                                    className="badge",
+                                                ),
                                             ],
                                         ),
                                         html.P(
-                                            "Position und Blickrichtung direkt in der Tabelle ändern. Yaw rotiert um die Z-Achse, Pitch ist das Neigen nach oben oder unten, Roll wird mitgeführt. Die Blickrichtung wird als dünne Linie im 3D-Plot dargestellt.",
+                                            str(
+                                                TRAJECTORY_JSON.relative_to(BASE_DIR)
+                                            ),
                                             className="sub",
                                         ),
+                                        html.Div(
+                                            className="row",
+                                            children=[
+                                                html.Button(
+                                                    "JSON herunterladen",
+                                                    id="btn-download-json",
+                                                    n_clicks=0,
+                                                    className="btn",
+                                                ),
+                                                html.Div(
+                                                    "",
+                                                    id="download-status",
+                                                    className="mono",
+                                                    style={
+                                                        "marginLeft": "10px",
+                                                        "color": "var(--muted)",
+                                                    },
+                                                ),
+                                            ]
+                                        )
+                                    ],
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            id="tab-3-content",
+                            style={"display": "none"},
+                            children=[
+                                html.Div(
+                                    className="card",
+                                    children=[
+                                        html.Div(
+                                            className="cardTitle",
+                                            children=[
+                                                html.H2("Kameras"),
+                                                html.Span("editierbar", className="badge"),
+                                            ],
+                                        ),
+
                                         dash_table.DataTable(
                                             id="pi-setup-table",
                                             data=default_pi_setup(),
@@ -456,47 +540,6 @@ app.layout = html.Div(
                                         ),
                                     ],
                                 ),
-                                html.Div(
-                                    className="card",
-                                    children=[
-                                        html.Div(
-                                            className="cardTitle",
-                                            children=[
-                                                html.H2("Datenquelle"),
-                                                html.Span(
-                                                    "JSON-Ausgabe",
-                                                    className="badge",
-                                                ),
-                                            ],
-                                        ),
-                                        html.P(
-                                            str(
-                                                TRAJECTORY_JSON.relative_to(BASE_DIR)
-                                            ),
-                                            className="sub",
-                                        ),
-                                        html.Div(
-                                            className="row",
-                                            children=[
-                                                html.Button(
-                                                    "JSON herunterladen",
-                                                    id="btn-download-json",
-                                                    n_clicks=0,
-                                                    className="btn",
-                                                ),
-                                                html.Div(
-                                                    "",
-                                                    id="download-status",
-                                                    className="mono",
-                                                    style={
-                                                        "marginLeft": "10px",
-                                                        "color": "var(--muted)",
-                                                    },
-                                                ),
-                                            ]
-                                        )
-                                    ],
-                                ),
                             ],
                         ),
                     ],
@@ -513,13 +556,17 @@ app.layout = html.Div(
 @app.callback(
     Output("tab-1-content", "style"),
     Output("tab-2-content", "style"),
+    Output("tab-3-content", "style"),
     Input("tabs", "value"),
 )
 def render_tab(tab):
     if tab == "tab-1":
-        return {"display": "block"}, {"display": "none"}
+        return {"display": "block"}, {"display": "none"}, {"display": "none"}
 
-    return {"display": "none"}, {"display": "block"}
+    if tab == "tab-2":
+        return {"display": "none"}, {"display": "block"}, {"display": "none"}
+
+    return {"display": "none"}, {"display": "none"}, {"display": "block"}
 
 
 @app.callback(
@@ -531,6 +578,11 @@ def render_tab(tab):
 )
 def run_trajectory(n_clicks, pi_setup_rows, aspect_mode):
     pi_setup = normalize_pi_setup(pi_setup_rows)
+    view_length = 400.0
+
+    for index, pi in enumerate(pi_setup):
+        pi["view_length"] = view_length
+
     triggered = ctx.triggered_id
 
     status_message = "Status: bereit"

@@ -13,6 +13,7 @@ def default_pi_setup() -> list[dict[str, float | str]]:
             "yaw_deg": 0.0,
             "pitch_deg": 45.0,
             "roll_deg": 0.0,
+            "view_length": 400.0,
         },
         {
             "id": "pi_2",
@@ -23,6 +24,7 @@ def default_pi_setup() -> list[dict[str, float | str]]:
             "yaw_deg": 180.0,
             "pitch_deg": 45.0,
             "roll_deg": 0.0,
+            "view_length": 400.0,
         },
         {
             "id": "pi_3",
@@ -33,6 +35,7 @@ def default_pi_setup() -> list[dict[str, float | str]]:
             "yaw_deg": 90.0,
             "pitch_deg": 45.0,
             "roll_deg": 0.0,
+            "view_length": 400.0,
         },
     ]
 
@@ -73,6 +76,10 @@ def normalize_pi_setup(rows: list[dict[str, Any]] | None) -> list[dict[str, floa
                     row.get("roll_deg"),
                     float(fallback["roll_deg"]),
                 ),
+                "view_length": to_float(
+                    row.get("view_length"),
+                    float(fallback["view_length"]),
+                ),
             }
         )
 
@@ -108,3 +115,85 @@ def direction_unit_vector(yaw_deg: float, pitch_deg: float, roll_deg: float = 0.
 def compute_view_vector(yaw_deg: float, pitch_deg: float, roll_deg: float, length: float) -> tuple[float, float, float]:
     unit_x, unit_y, unit_z = direction_unit_vector(yaw_deg, pitch_deg, roll_deg)
     return (unit_x * length, unit_y * length, unit_z * length)
+
+
+def perpendicular_square_corners(
+    end_x: float,
+    end_y: float,
+    end_z: float,
+    direction_x: float,
+    direction_y: float,
+    direction_z: float,
+    side_length: float,
+) -> list[tuple[float, float, float]]:
+    """Erzeugt die vier Ecken eines Quadrats, das senkrecht zur Richtung steht."""
+    direction_magnitude = math.sqrt(direction_x ** 2 + direction_y ** 2 + direction_z ** 2)
+    if direction_magnitude <= 1e-12:
+        direction_unit = (0.0, 0.0, 1.0)
+    else:
+        direction_unit = (
+            direction_x / direction_magnitude,
+            direction_y / direction_magnitude,
+            direction_z / direction_magnitude,
+        )
+
+    reference_axes = [
+        (0.0, 0.0, 1.0),
+        (0.0, 1.0, 0.0),
+        (1.0, 0.0, 0.0),
+    ]
+
+    basis_u = (1.0, 0.0, 0.0)
+    basis_v = (0.0, 1.0, 0.0)
+
+    for reference_x, reference_y, reference_z in reference_axes:
+        cross_x = direction_unit[1] * reference_z - direction_unit[2] * reference_y
+        cross_y = direction_unit[2] * reference_x - direction_unit[0] * reference_z
+        cross_z = direction_unit[0] * reference_y - direction_unit[1] * reference_x
+        cross_magnitude = math.sqrt(cross_x ** 2 + cross_y ** 2 + cross_z ** 2)
+
+        if cross_magnitude > 1e-12:
+            basis_u = (
+                cross_x / cross_magnitude,
+                cross_y / cross_magnitude,
+                cross_z / cross_magnitude,
+            )
+            break
+
+    basis_v_x = direction_unit[1] * basis_u[2] - direction_unit[2] * basis_u[1]
+    basis_v_y = direction_unit[2] * basis_u[0] - direction_unit[0] * basis_u[2]
+    basis_v_z = direction_unit[0] * basis_u[1] - direction_unit[1] * basis_u[0]
+
+    basis_v_magnitude = math.sqrt(basis_v_x ** 2 + basis_v_y ** 2 + basis_v_z ** 2)
+    if basis_v_magnitude <= 1e-12:
+        basis_v = (0.0, 1.0, 0.0)
+    else:
+        basis_v = (
+            basis_v_x / basis_v_magnitude,
+            basis_v_y / basis_v_magnitude,
+            basis_v_z / basis_v_magnitude,
+        )
+
+    half_side = side_length / 2.0
+    return [
+        (
+            end_x + basis_u[0] * half_side + basis_v[0] * half_side,
+            end_y + basis_u[1] * half_side + basis_v[1] * half_side,
+            end_z + basis_u[2] * half_side + basis_v[2] * half_side,
+        ),
+        (
+            end_x - basis_u[0] * half_side + basis_v[0] * half_side,
+            end_y - basis_u[1] * half_side + basis_v[1] * half_side,
+            end_z - basis_u[2] * half_side + basis_v[2] * half_side,
+        ),
+        (
+            end_x - basis_u[0] * half_side - basis_v[0] * half_side,
+            end_y - basis_u[1] * half_side - basis_v[1] * half_side,
+            end_z - basis_u[2] * half_side - basis_v[2] * half_side,
+        ),
+        (
+            end_x + basis_u[0] * half_side - basis_v[0] * half_side,
+            end_y + basis_u[1] * half_side - basis_v[1] * half_side,
+            end_z + basis_u[2] * half_side - basis_v[2] * half_side,
+        ),
+    ]

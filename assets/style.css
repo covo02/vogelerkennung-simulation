@@ -266,14 +266,14 @@ a:hover{ text-decoration:underline; }
 /* HOVER (td/tr based rendering) */
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner tr:hover td,
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td:hover{
-  background:rgba(42,98,255,0.16) !important;
+  background:rgba(26,33,46,0.96) !important;
   color:var(--text) !important;
 }
 
 /* HOVER (div based rendering) */
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner .dash-row:hover .dash-cell,
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner .dash-cell:hover{
-  background:rgba(42,98,255,0.16) !important;
+  background:rgba(26,33,46,0.96) !important;
   color:var(--text) !important;
 }
 
@@ -281,9 +281,9 @@ a:hover{ text-decoration:underline; }
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td.focused,
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td.cell--selected,
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td.cell--selected-focused{
-  background:rgba(42,98,255,0.24) !important;
+  background:rgba(28,35,48,0.96) !important;
   color:var(--text) !important;
-  outline:1px solid rgba(42,98,255,0.55) !important;
+  outline:1px solid rgba(42,98,255,0.45) !important;
   outline-offset:-1px !important;
 }
 
@@ -291,16 +291,16 @@ a:hover{ text-decoration:underline; }
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner .dash-cell.focused,
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner .dash-cell.cell--selected,
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner .dash-cell.cell--selected-focused{
-  background:rgba(42,98,255,0.24) !important;
+  background:rgba(28,35,48,0.96) !important;
   color:var(--text) !important;
-  outline:1px solid rgba(42,98,255,0.55) !important;
+  outline:1px solid rgba(42,98,255,0.45) !important;
   outline-offset:-1px !important;
 }
 
 /* Selected row (row_selectable) */
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner tr.row--selected td,
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner .dash-row.row--selected .dash-cell{
-  background:rgba(42,98,255,0.20) !important;
+  background:rgba(34,42,58,0.96) !important;
   color:var(--text) !important;
 }
 
@@ -309,7 +309,7 @@ a:hover{ text-decoration:underline; }
 .dash-table-container td[style*="background-color"],
 .dash-table-container .dash-cell[style*="background"],
 .dash-table-container .dash-cell[style*="background-color"]{
-  background:rgba(42,98,255,0.16) !important;
+  background:rgba(30,38,52,0.96) !important;
   color:var(--text) !important;
 }
 

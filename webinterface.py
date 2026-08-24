@@ -6,7 +6,13 @@ from pathlib import Path
 import dash
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, dcc, html
+from dash import Input, Output, ctx, dash_table, dcc, html
+from pi_view_simulation import (
+    compute_view_vector,
+    default_pi_setup,
+    normalize_pi_setup,
+    to_float,
+)
 
 # ============================================================================
 # KONFIGURATION
@@ -20,6 +26,7 @@ TRAJECTORY_JSON = (
 )
 
 SCRIPT_TIMEOUT_SECONDS = 300
+VIEW_VECTOR_LENGTH = 180.0
 
 app = dash.Dash(__name__)
 server = app.server
@@ -55,55 +62,131 @@ def status_figure(message: str) -> go.Figure:
     return fig
 
 
-def create_trajectory_figure() -> go.Figure:
-    """Lädt die JSON-Datei und erstellt den 3D-Trajektorienplot."""
+def load_trajectory_dataframe() -> pd.DataFrame | None:
     if not TRAJECTORY_JSON.is_file():
-        raise FileNotFoundError(
-            f"Die Ausgabedatei wurde nicht gefunden: {TRAJECTORY_JSON}"
-        )
+        return None
 
     with TRAJECTORY_JSON.open("r", encoding="utf-8") as file:
-        data = json.load(file)
+        payload = json.load(file)
+
+    if isinstance(payload, dict):
+        data = payload.get("simulated_birds")
+    else:
+        data = payload
 
     if not isinstance(data, list) or not data:
-        raise ValueError("Die JSON-Datei enthält keine Trajektoriendaten.")
+        return None
 
     df = pd.DataFrame(data)
 
     required_columns = {"bird_id", "timestamp", "enu_e", "enu_n", "enu_u"}
     missing_columns = required_columns - set(df.columns)
-
     if missing_columns:
-        missing = ", ".join(sorted(missing_columns))
-        raise ValueError(f"Folgende Spalten fehlen in der JSON-Datei: {missing}")
+        return None
 
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-
     for coordinate in ("enu_e", "enu_n", "enu_u"):
         df[coordinate] = pd.to_numeric(df[coordinate], errors="coerce")
 
     df = df.dropna(subset=["bird_id", "timestamp", "enu_e", "enu_n", "enu_u"])
     df = df.sort_values(["bird_id", "timestamp"])
 
-    if df.empty:
-        raise ValueError("Nach der Datenbereinigung sind keine Punkte vorhanden.")
+    return df if not df.empty else None
 
+
+def build_figure(
+    trajectory_df: pd.DataFrame | None,
+    pi_setup: list[dict],
+    message: str | None = None,
+    aspect_mode: str = "data",
+) -> go.Figure:
     fig = go.Figure()
 
-    for bird_id, group in df.groupby("bird_id", sort=False):
-        # Flugbahn
+    if trajectory_df is not None:
+        for bird_id, group in trajectory_df.groupby("bird_id", sort=False):
+            fig.add_trace(
+                go.Scatter3d(
+                    x=group["enu_e"],
+                    y=group["enu_n"],
+                    z=group["enu_u"],
+                    mode="lines+markers",
+                    marker=dict(symbol="circle", size=2),
+                    name=str(bird_id),
+                    text=group["timestamp"].astype(str),
+                    hovertemplate=(
+                        "<b>%{fullData.name}</b><br>"
+                        "Zeit: %{text}<br>"
+                        "X: %{x}<br>"
+                        "Y: %{y}<br>"
+                        "Z: %{z}<extra></extra>"
+                    ),
+                )
+            )
+
+            dx = group["enu_e"].shift(-1) - group["enu_e"]
+            dy = group["enu_n"].shift(-1) - group["enu_n"]
+            dz = group["enu_u"].shift(-1) - group["enu_u"]
+            vector_mask = dx.notna() & dy.notna() & dz.notna()
+
+            if vector_mask.any():
+                fig.add_trace(
+                    go.Cone(
+                        x=group.loc[vector_mask, "enu_e"],
+                        y=group.loc[vector_mask, "enu_n"],
+                        z=group.loc[vector_mask, "enu_u"],
+                        u=dx.loc[vector_mask],
+                        v=dy.loc[vector_mask],
+                        w=dz.loc[vector_mask],
+                        sizemode="absolute",
+                        sizeref=20,
+                        anchor="tail",
+                        showscale=False,
+                        name=f"{bird_id} Richtung",
+                    )
+                )
+
+    if pi_setup:
+        pi_x = []
+        pi_y = []
+        pi_z = []
+        pi_names = []
+        view_u = []
+        view_v = []
+        view_w = []
+
+        for pi in pi_setup:
+            yaw_deg = to_float(pi.get("yaw_deg", pi.get("view_horizontal_deg")), 0.0)
+            pitch_deg = to_float(pi.get("pitch_deg", pi.get("view_vertical_deg")), 0.0)
+            roll_deg = to_float(pi.get("roll_deg"), 0.0)
+            pi_x.append(to_float(pi.get("x"), 0.0))
+            pi_y.append(to_float(pi.get("y"), 0.0))
+            pi_z.append(to_float(pi.get("z"), 0.0))
+            pi_names.append(f"{pi.get('name', pi.get('id', 'Pi'))} ({pi.get('id', 'pi')})")
+
+            # 1) Richtung bestimmen, 2) auf feste Länge skalieren.
+            view_x, view_y, view_z = compute_view_vector(
+                yaw_deg,
+                pitch_deg,
+                roll_deg,
+                VIEW_VECTOR_LENGTH,
+            )
+            view_u.append(view_x)
+            view_v.append(view_y)
+            view_w.append(view_z)
+
         fig.add_trace(
             go.Scatter3d(
-                x=group["enu_e"],
-                y=group["enu_n"],
-                z=group["enu_u"],
-                mode="lines+markers",
-                marker=dict(symbol="circle", size=2),
-                name=str(bird_id),
-                text=group["timestamp"].astype(str),
+                x=pi_x,
+                y=pi_y,
+                z=pi_z,
+                mode="markers+text",
+                marker=dict(size=5, color="red", symbol="diamond"),
+                text=pi_names,
+                textposition="top center",
+                name="Raspberry Pis",
+                legendgroup="setup",
                 hovertemplate=(
-                    "<b>%{fullData.name}</b><br>"
-                    "Zeit: %{text}<br>"
+                    "<b>%{text}</b><br>"
                     "X: %{x}<br>"
                     "Y: %{y}<br>"
                     "Z: %{z}<extra></extra>"
@@ -111,30 +194,40 @@ def create_trajectory_figure() -> go.Figure:
             )
         )
 
-        # Richtungsvektoren berechnen
-        dx = group["enu_e"].shift(-1) - group["enu_e"]
-        dy = group["enu_n"].shift(-1) - group["enu_n"]
-        dz = group["enu_u"].shift(-1) - group["enu_u"]
-
-        # Letzten Punkt entfernen, da kein Nachfolger vorhanden ist
-        vector_mask = dx.notna() & dy.notna() & dz.notna()
-
-        if vector_mask.any():
+        for pi, x, y, z, u, v, w in zip(pi_setup, pi_x, pi_y, pi_z, view_u, view_v, view_w):
             fig.add_trace(
-                go.Cone(
-                    x=group.loc[vector_mask, "enu_e"],
-                    y=group.loc[vector_mask, "enu_n"],
-                    z=group.loc[vector_mask, "enu_u"],
-                    u=dx.loc[vector_mask],
-                    v=dy.loc[vector_mask],
-                    w=dz.loc[vector_mask],
-                    sizemode="absolute",
-                    sizeref=20,
-                    anchor="tail",
-                    showscale=False,
-                    name=f"{bird_id} Richtung",
+                go.Scatter3d(
+                    x=[x, x + u],
+                    y=[y, y + v],
+                    z=[z, z + w],
+                    mode="lines",
+                    line=dict(width=3, color="#f59e0b"),
+                    name=f"{pi.get('name', pi.get('id', 'Pi'))} Blick",
+                    showlegend=False,
+                    legendgroup="setup",
+                    hovertemplate=(
+                        f"<b>{pi.get('name', pi.get('id', 'Pi'))}</b><br>"
+                        f"Yaw: {yaw_deg:.1f}°<br>"
+                        f"Pitch: {pitch_deg:.1f}°<br>"
+                        f"Roll: {roll_deg:.1f}°<br>"
+                        "X: %{x}<br>"
+                        "Y: %{y}<br>"
+                        "Z: %{z}<extra></extra>"
+                    ),
                 )
             )
+
+    if message:
+        fig.add_annotation(
+            text=message,
+            x=0.5,
+            y=0.98,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            font=dict(size=14),
+            bgcolor="rgba(0,0,0,0.35)",
+        )
 
     fig.update_layout(
         template="plotly_dark",
@@ -142,17 +235,11 @@ def create_trajectory_figure() -> go.Figure:
             xaxis_title="X",
             yaxis_title="Y",
             zaxis_title="Z",
-            aspectmode="manual",
-            aspectratio=dict(
-                x=1,
-                y=1,
-                z=1
-            ),
+            aspectmode=aspect_mode,
+            camera=dict(projection=dict(type="orthographic")),
         ),
         height=1000,
-        legend=dict(
-            itemsizing="constant"
-        )
+        legend=dict(itemsizing="constant"),
     )
 
     return fig
@@ -257,6 +344,28 @@ app.layout = html.Div(
                                         html.Div(className="divider"),
 
                                         html.Div(
+                                            className="row",
+                                            children=[
+                                                html.Span("Achsenverhältnis", className="label"),
+                                                dcc.RadioItems(
+                                                    id="aspect-mode-toggle",
+                                                    options=[
+                                                        {"label": "Cube", "value": "cube"},
+                                                        {"label": "Data", "value": "data"},
+                                                    ],
+                                                    value="data",
+                                                    inline=True,
+                                                    labelStyle={
+                                                        "marginRight": "12px",
+                                                        "color": "var(--text)",
+                                                        "fontWeight": "700",
+                                                    },
+                                                    inputStyle={"marginRight": "6px"},
+                                                ),
+                                            ],
+                                        ),
+
+                                        html.Div(
                                             className="cardTitle",
                                             children=[html.H2("3D-Flugtrajektorien")],
                                         ),
@@ -265,9 +374,11 @@ app.layout = html.Div(
                                             type="default",
                                             children=dcc.Graph(
                                                 id="main-graph",
-                                                figure=status_figure(
-                                                    "Klicke auf „Trajektorie berechnen“, "
-                                                    "um den 3D-Plot zu laden."
+                                                figure=build_figure(
+                                                    load_trajectory_dataframe(),
+                                                    default_pi_setup(),
+                                                    "Klicke auf „Trajektorie berechnen“, um die Trajektorien zu laden.",
+                                                    aspect_mode="cube",
                                                 ),
                                                 config={"responsive": True},
                                                 style={"height": "1000px"},
@@ -282,6 +393,69 @@ app.layout = html.Div(
                             id="tab-2-content",
                             style={"display": "none"},
                             children=[
+                                html.Div(
+                                    className="card",
+                                    children=[
+                                        html.Div(
+                                            className="cardTitle",
+                                            children=[
+                                                html.H2("Pi-Setup"),
+                                                html.Span("editierbar", className="badge"),
+                                            ],
+                                        ),
+                                        html.P(
+                                            "Position und Blickrichtung direkt in der Tabelle ändern. Yaw rotiert um die Z-Achse, Pitch ist das Neigen nach oben oder unten, Roll wird mitgeführt. Die Blickrichtung wird als dünne Linie im 3D-Plot dargestellt.",
+                                            className="sub",
+                                        ),
+                                        dash_table.DataTable(
+                                            id="pi-setup-table",
+                                            data=default_pi_setup(),
+                                            columns=[
+                                                {"name": "Name", "id": "name", "editable": False},
+                                                {"name": "X", "id": "x", "type": "numeric"},
+                                                {"name": "Y", "id": "y", "type": "numeric"},
+                                                {"name": "Z", "id": "z", "type": "numeric"},
+                                                {"name": "Yaw um Z [°]", "id": "yaw_deg", "type": "numeric"},
+                                                {"name": "Pitch hoch/runter [°]", "id": "pitch_deg", "type": "numeric"},
+                                                {"name": "Roll [°]", "id": "roll_deg", "type": "numeric"},
+                                            ],
+                                            editable=True,
+                                            row_deletable=False,
+                                            sort_action="none",
+                                            style_table={"overflowX": "auto"},
+                                            style_cell={
+                                                "backgroundColor": "rgba(255,255,255,0.02)",
+                                                "color": "var(--text)",
+                                                "border": "1px solid var(--border)",
+                                                "padding": "8px",
+                                                "fontFamily": "inherit",
+                                                "fontSize": "13px",
+                                            },
+                                            style_header={
+                                                "backgroundColor": "rgba(255,255,255,0.05)",
+                                                "fontWeight": "700",
+                                                "color": "var(--text)",
+                                                "border": "1px solid var(--border)",
+                                            },
+                                            style_data_conditional=[
+                                                {"if": {"row_index": "odd"}, "backgroundColor": "rgba(255,255,255,0.015)"},
+                                                {"if": {"column_id": "name"}, "fontWeight": "700"},
+                                                {
+                                                    "if": {"state": "active"},
+                                                    "backgroundColor": "rgba(28,35,48,0.96)",
+                                                    "color": "#e7eaf0",
+                                                    "border": "1px solid rgba(42,98,255,0.45)",
+                                                },
+                                                {
+                                                    "if": {"state": "selected"},
+                                                    "backgroundColor": "rgba(34,42,58,0.96)",
+                                                    "color": "#e7eaf0",
+                                                    "border": "1px solid rgba(42,98,255,0.45)",
+                                                },
+                                            ],
+                                        ),
+                                    ],
+                                ),
                                 html.Div(
                                     className="card",
                                     children=[
@@ -352,53 +526,81 @@ def render_tab(tab):
     Output("main-graph", "figure"),
     Output("action-output", "children"),
     Input("btn-run-trajectory", "n_clicks"),
-    prevent_initial_call=True,
+    Input("pi-setup-table", "data"),
+    Input("aspect-mode-toggle", "value"),
 )
-def run_trajectory(_n_clicks):
-    if not TRAJECTORY_SCRIPT.is_file():
-        return (
-            status_figure("trajectory.py wurde nicht gefunden."),
-            f"Status: Datei nicht gefunden: {TRAJECTORY_SCRIPT}",
-        )
+def run_trajectory(n_clicks, pi_setup_rows, aspect_mode):
+    pi_setup = normalize_pi_setup(pi_setup_rows)
+    triggered = ctx.triggered_id
 
-    try:
-        # Führt trajectory.py mit demselben Python-Interpreter aus,
-        # mit dem auch Dash gestartet wurde.
-        subprocess.run(
-            [sys.executable, str(TRAJECTORY_SCRIPT)],
-            cwd=str(BASE_DIR),
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=SCRIPT_TIMEOUT_SECONDS,
-        )
+    status_message = "Status: bereit"
 
-        figure = create_trajectory_figure()
+    if triggered == "btn-run-trajectory" and (n_clicks or 0) > 0:
+        if not TRAJECTORY_SCRIPT.is_file():
+            return (
+                build_figure(
+                    load_trajectory_dataframe(),
+                    pi_setup,
+                    "trajectory.py wurde nicht gefunden.",
+                    aspect_mode=aspect_mode or "data",
+                ),
+                f"Status: Datei nicht gefunden: {TRAJECTORY_SCRIPT}",
+            )
 
-        return (
-            figure,
-            "Status: trajectory.py wurde erfolgreich ausgeführt. 3D-Plot geladen.",
-        )
+        try:
+            subprocess.run(
+                [sys.executable, str(TRAJECTORY_SCRIPT)],
+                cwd=str(BASE_DIR),
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=SCRIPT_TIMEOUT_SECONDS,
+            )
+            status_message = "Status: trajectory.py wurde erfolgreich ausgeführt. 3D-Plot geladen."
+        except subprocess.TimeoutExpired:
+            return (
+                build_figure(
+                    load_trajectory_dataframe(),
+                    pi_setup,
+                    "Die Berechnung hat das Zeitlimit überschritten.",
+                    aspect_mode=aspect_mode or "data",
+                ),
+                f"Status: Abbruch nach {SCRIPT_TIMEOUT_SECONDS} Sekunden.",
+            )
+        except subprocess.CalledProcessError as error:
+            details = short_error_message(error.stderr or error.stdout)
+            return (
+                build_figure(
+                    load_trajectory_dataframe(),
+                    pi_setup,
+                    "Fehler beim Ausführen von trajectory.py.",
+                    aspect_mode=aspect_mode or "data",
+                ),
+                f"Status: trajectory.py ist fehlgeschlagen: {details}",
+            )
+        except Exception as error:
+            return (
+                build_figure(
+                    load_trajectory_dataframe(),
+                    pi_setup,
+                    "Die Trajektoriendaten konnten nicht geladen werden.",
+                    aspect_mode=aspect_mode or "data",
+                ),
+                f"Status: Fehler beim Laden der Daten: {short_error_message(error)}",
+            )
+    elif triggered == "pi-setup-table":
+        status_message = "Status: Pi-Setup aktualisiert."
 
-    except subprocess.TimeoutExpired:
-        return (
-            status_figure("Die Berechnung hat das Zeitlimit überschritten."),
-            f"Status: Abbruch nach {SCRIPT_TIMEOUT_SECONDS} Sekunden.",
-        )
-
-    except subprocess.CalledProcessError as error:
-        details = short_error_message(error.stderr or error.stdout)
-
-        return (
-            status_figure("Fehler beim Ausführen von trajectory.py."),
-            f"Status: trajectory.py ist fehlgeschlagen: {details}",
-        )
-
-    except Exception as error:
-        return (
-            status_figure("Die Trajektoriendaten konnten nicht geladen werden."),
-            f"Status: Fehler beim Laden der Daten: {short_error_message(error)}",
-        )
+    trajectory_df = load_trajectory_dataframe()
+    return (
+        build_figure(
+            trajectory_df,
+            pi_setup,
+            status_message,
+            aspect_mode=aspect_mode or "data",
+        ),
+        status_message,
+    )
 
 
 @app.callback(

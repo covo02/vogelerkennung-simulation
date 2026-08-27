@@ -30,3 +30,17 @@ Date: 2026-08-24
 ## Notes
 - The trajectory pipeline still loads the generated bird data and keeps the Pi metadata in the output structure.
 - The new UI controls are backward compatible with the older Pi field names.
+
+Date: 2026-08-27
+
+## Camera Geometry
+- Fixed the Pi view-vector length at `400`.
+- Added a square plane at the end of each Pi view vector.
+- Added shared basis and square-corner helpers so the plane orientation matches the vector direction.
+
+## View Volume Filtering
+- Added helpers in `pi_view_simulation.py` to test whether 3D points lie inside the pyramid volume between a Pi and its end plane.
+- Added a function to collect all matching points for each Pi.
+- Added a new button in `webinterface.py` to filter all trajectory points to those inside at least one Pi pyramid.
+- Made the filter overwrite `vogel_flugbahnen_determined.json` with only the kept points.
+- Added a status message that reports how many points were kept and how many were removed.

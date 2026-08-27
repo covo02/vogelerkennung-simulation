@@ -12,6 +12,7 @@ from pi_view_simulation import (
     default_pi_setup,
     normalize_pi_setup,
     perpendicular_square_corners,
+    points_in_view_volume_for_each_pi,
     to_float,
 )
 
@@ -27,6 +28,7 @@ TRAJECTORY_JSON = (
 )
 
 SCRIPT_TIMEOUT_SECONDS = 300
+CAMERA_PLANE_SIDE_LENGTH = 600.0
 
 app = dash.Dash(__name__)
 server = app.server
@@ -66,8 +68,7 @@ def load_trajectory_dataframe() -> pd.DataFrame | None:
     if not TRAJECTORY_JSON.is_file():
         return None
 
-    with TRAJECTORY_JSON.open("r", encoding="utf-8") as file:
-        payload = json.load(file)
+    payload = load_trajectory_payload()
 
     if isinstance(payload, dict):
         data = payload.get("simulated_birds")
@@ -92,6 +93,34 @@ def load_trajectory_dataframe() -> pd.DataFrame | None:
     df = df.sort_values(["bird_id", "timestamp"])
 
     return df if not df.empty else None
+
+
+def load_trajectory_payload() -> dict | list | None:
+    if not TRAJECTORY_JSON.is_file():
+        return None
+
+    with TRAJECTORY_JSON.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+def extract_trajectory_records(payload: dict | list | None) -> list[dict]:
+    if isinstance(payload, dict):
+        records = payload.get("simulated_birds")
+    else:
+        records = payload
+
+    return records if isinstance(records, list) else []
+
+
+def save_trajectory_payload(payload: dict | list | None, records: list[dict]) -> None:
+    if isinstance(payload, dict):
+        payload_to_save = dict(payload)
+        payload_to_save["simulated_birds"] = records
+    else:
+        payload_to_save = records
+
+    with TRAJECTORY_JSON.open("w", encoding="utf-8") as file:
+        json.dump(payload_to_save, file, ensure_ascii=False, indent=2)
 
 
 def build_figure(
@@ -222,7 +251,7 @@ def build_figure(
                 )
             )
 
-            plane_side_length = 600.0
+            plane_side_length = CAMERA_PLANE_SIDE_LENGTH
             square_corners = perpendicular_square_corners(
                 view_end_x,
                 view_end_y,
@@ -366,6 +395,12 @@ app.layout = html.Div(
                                                 html.Button(
                                                     "Trajektorie berechnen",
                                                     id="btn-run-trajectory",
+                                                    n_clicks=0,
+                                                    className="btn",
+                                                ),
+                                                html.Button(
+                                                    "Punkte in Pyramiden filtern",
+                                                    id="btn-filter-pyramid-points",
                                                     n_clicks=0,
                                                     className="btn",
                                                 ),
@@ -573,10 +608,11 @@ def render_tab(tab):
     Output("main-graph", "figure"),
     Output("action-output", "children"),
     Input("btn-run-trajectory", "n_clicks"),
+    Input("btn-filter-pyramid-points", "n_clicks"),
     Input("pi-setup-table", "data"),
     Input("aspect-mode-toggle", "value"),
 )
-def run_trajectory(n_clicks, pi_setup_rows, aspect_mode):
+def run_trajectory(n_clicks, filter_clicks, pi_setup_rows, aspect_mode):
     pi_setup = normalize_pi_setup(pi_setup_rows)
     view_length = 400.0
 
@@ -640,6 +676,40 @@ def run_trajectory(n_clicks, pi_setup_rows, aspect_mode):
                 ),
                 f"Status: Fehler beim Laden der Daten: {short_error_message(error)}",
             )
+    elif triggered == "btn-filter-pyramid-points" and (filter_clicks or 0) > 0:
+        payload = load_trajectory_payload()
+        records = extract_trajectory_records(payload)
+
+        if not records:
+            return (
+                build_figure(
+                    load_trajectory_dataframe(),
+                    pi_setup,
+                    "Keine Trajektoriendaten zum Filtern gefunden.",
+                    aspect_mode=aspect_mode or "data",
+                ),
+                "Status: Keine Trajektoriendaten zum Filtern gefunden.",
+            )
+
+        points_by_pi = points_in_view_volume_for_each_pi(
+            pi_setup,
+            records,
+            CAMERA_PLANE_SIDE_LENGTH,
+        )
+        matching_point_ids = {
+            id(point)
+            for pi_points in points_by_pi.values()
+            for point in pi_points
+        }
+        filtered_records = [record for record in records if id(record) in matching_point_ids]
+
+        save_trajectory_payload(payload, filtered_records)
+
+        deleted_points = len(records) - len(filtered_records)
+        status_message = (
+            f"Status: {len(filtered_records)} Punkte innerhalb der Pyramiden behalten, "
+            f"{deleted_points} Punkte entfernt."
+        )
     elif triggered == "pi-setup-table":
         status_message = "Status: Pi-Setup aktualisiert."
 

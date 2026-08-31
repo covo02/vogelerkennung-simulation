@@ -6,7 +6,7 @@ from pathlib import Path
 import dash
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, ctx, dash_table, dcc, html
+from dash import Input, Output, State, ctx, dash_table, dcc, html, no_update
 from pi_view_simulation import (
     compute_view_vector,
     default_pi_setup,
@@ -15,6 +15,12 @@ from pi_view_simulation import (
     points_in_view_volume_for_each_pi,
     to_float,
 )
+
+from helper_functions.additional_styles import ERROR_STATUS_STYLE, SUCCESS_STATUS_STYLE
+from helper_functions.bird_generation import build_pi_devices, generate_birds, parse_generation_parameters
+from helper_functions.bird_generation_layout import bird_generator_tab
+from helper_functions.generate_plots import create_bird_stats, create_birds_2d_figure, create_birds_3d_figure, status_figure
+
 
 # ============================================================================
 # KONFIGURATION
@@ -27,6 +33,9 @@ TRAJECTORY_JSON = (
     BASE_DIR / "vogel_flugbahnen_determined.json"
 )
 
+BIRDS_JSON = BASE_DIR / "vogel_flugbahnen.json"
+
+
 SCRIPT_TIMEOUT_SECONDS = 300
 CAMERA_PLANE_SIDE_LENGTH = 600.0
 
@@ -37,32 +46,6 @@ server = app.server
 # ============================================================================
 # HILFSFUNKTIONEN
 # ============================================================================
-def status_figure(message: str) -> go.Figure:
-    """Leerer Plot mit Statusmeldung."""
-    fig = go.Figure()
-
-    fig.add_annotation(
-        text=message,
-        x=0.5,
-        y=0.5,
-        xref="paper",
-        yref="paper",
-        showarrow=False,
-        font=dict(size=16),
-    )
-
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        height=1000,
-        margin=dict(l=10, r=10, t=30, b=10),
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-    )
-
-    return fig
-
 
 def load_trajectory_dataframe() -> pd.DataFrame | None:
     if not TRAJECTORY_JSON.is_file():
@@ -366,6 +349,12 @@ app.layout = html.Div(
                             className="custom-tab",
                             selected_className="custom-tab--selected",
                         ),
+                        dcc.Tab(
+                            label="Vogelgenerierung",
+                            value="tab-generate",
+                            className="custom-tab",
+                            selected_className="custom-tab--selected",
+                        ),
                     ],
                 ),
 
@@ -577,6 +566,7 @@ app.layout = html.Div(
                                 ),
                             ],
                         ),
+                        bird_generator_tab(),
                     ],
                 ),
             ],
@@ -592,16 +582,22 @@ app.layout = html.Div(
     Output("tab-1-content", "style"),
     Output("tab-2-content", "style"),
     Output("tab-3-content", "style"),
+    Output("tab-generate-content", "style"),
     Input("tabs", "value"),
 )
 def render_tab(tab):
+    visible = {"display": "block"}
+    hidden = {"display": "none"}
     if tab == "tab-1":
-        return {"display": "block"}, {"display": "none"}, {"display": "none"}
+        return visible, hidden, hidden, hidden
 
     if tab == "tab-2":
-        return {"display": "none"}, {"display": "block"}, {"display": "none"}
+        return hidden, visible, hidden, hidden
 
-    return {"display": "none"}, {"display": "none"}, {"display": "block"}
+    if tab == "tab-3":
+        return hidden, hidden, visible, hidden
+
+    return hidden, hidden, hidden, visible
 
 
 @app.callback(
@@ -740,6 +736,150 @@ def download_json(n_clicks):
         ), "Status: Datei gefunden, Download gestartet."
     
     return None, "Status: Datei nicht verfügbar. Bitte zuerst berechnen."
+
+
+# ============================================================================
+# CALLBACKS: VOGELGENERIERUNG
+# ============================================================================
+@app.callback(
+    Output("bird-generation-status", "children"),
+    Output("bird-generation-status", "style"),
+    Output("bird-stats", "children"),
+    Output("bird-2d-graph", "figure"),
+    Output("bird-3d-graph", "figure"),
+    Input("btn-generate-birds", "n_clicks"),
+    State("gen-number-of-birds", "value"),
+    State("gen-time-interval", "value"),
+    State("gen-date", "date"),
+    State("gen-seed", "value"),
+    State("gen-x-min", "value"),
+    State("gen-x-max", "value"),
+    State("gen-y-min", "value"),
+    State("gen-y-max", "value"),
+    State("gen-z-min", "value"),
+    State("gen-z-max", "value"),
+    State("gen-initial-spread", "value"),
+    State("gen-min-speed", "value"),
+    State("gen-max-speed", "value"),
+    State("gen-position-noise", "value"),
+    State("gen-variance-angle", "value"),
+    State("gen-variance-speed", "value"),
+    State("gen-variance-z", "value"),
+    State("gen-variance-vertical-speed", "value"),
+    prevent_initial_call=True,
+)
+def generate_birds_json(
+    _n_clicks,
+    number_of_birds_value,
+    time_interval_value,
+    simulation_date_value,
+    seed_text_value,
+    x_min_value,
+    x_max_value,
+    y_min_value,
+    y_max_value,
+    z_min_value,
+    z_max_value,
+    initial_spread_value,
+    min_speed_value,
+    max_speed_value,
+    position_noise_value,
+    variance_angle_value,
+    variance_speed_value,
+    variance_z_value,
+    variance_vertical_speed_value,
+):
+    try:
+        parameters = parse_generation_parameters(
+            number_of_birds_value=number_of_birds_value,
+            time_interval_value=time_interval_value,
+            simulation_date_value=simulation_date_value,
+            seed_text_value=seed_text_value,
+            x_min_value=x_min_value,
+            x_max_value=x_max_value,
+            y_min_value=y_min_value,
+            y_max_value=y_max_value,
+            z_min_value=z_min_value,
+            z_max_value=z_max_value,
+            initial_spread_value=initial_spread_value,
+            min_speed_value=min_speed_value,
+            max_speed_value=max_speed_value,
+            position_noise_value=position_noise_value,
+            variance_angle_value=variance_angle_value,
+            variance_speed_value=variance_speed_value,
+            variance_z_value=variance_z_value,
+            variance_vertical_speed_value=variance_vertical_speed_value,
+        )
+
+        records = generate_birds(**parameters)
+
+        pi_devices = build_pi_devices(
+            parameters["x_min"],
+            parameters["x_max"],
+            parameters["y_min"],
+            parameters["y_max"],
+        )
+
+        output_data = {
+            "plotAttachment": {
+                "version": "1.0",
+                "type": "triangulation_setup",
+                "devices": pi_devices,
+            },
+            "simulated_birds": records,
+        }
+
+        BIRDS_JSON.write_text(
+            json.dumps(
+                output_data,
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        df = pd.DataFrame(records)
+
+        figure_2d = create_birds_2d_figure(df)
+
+        figure_3d = create_birds_3d_figure(
+            df,
+            pi_devices,
+            parameters["z_min"],
+            parameters["z_max"],
+        )
+
+        return (
+            (
+                f"Status: {len(records)} Datenpunkte wurden erfolgreich "
+                f"erzeugt und in „{BIRDS_JSON.name}“ gespeichert."
+            ),
+            SUCCESS_STATUS_STYLE,
+            create_bird_stats(df),
+            figure_2d,
+            figure_3d,
+        )
+
+    except ValueError as error:
+        return (
+            f"Status: Eingabefehler – {error}",
+            ERROR_STATUS_STYLE,
+            no_update,
+            no_update,
+            no_update,
+        )
+
+    except Exception as error:
+        return (
+            (
+                "Status: Fehler bei der Generierung – "
+                f"{short_error_message(error)}"
+            ),
+            ERROR_STATUS_STYLE,
+            no_update,
+            no_update,
+            no_update,
+        )
 
 
 # ============================================================================

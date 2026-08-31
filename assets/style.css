@@ -336,3 +336,27 @@ a:hover{ text-decoration:underline; }
 .mono{
   font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
+
+/* ============================================================================
+   Dash
+============================================================================ */
+
+.dash-input-container{
+  color: #000000; /* Weißer Text für dunklen Hintergrund */
+
+}
+
+.dash-slider-mark {
+  position: absolute;
+  font-size: 12px;
+  height: 12px;
+  line-height: 12px;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+
+.dash-datepicker-input {
+  color: #000
+}

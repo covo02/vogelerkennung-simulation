@@ -12,7 +12,9 @@ from pi_view_simulation import (
     default_pi_setup,
     normalize_pi_setup,
     perpendicular_square_corners,
+    point_in_pi_view_volume,
     points_in_view_volume_for_each_pi,
+    project_point_to_pi_plane,
     to_float,
 )
 
@@ -47,11 +49,11 @@ server = app.server
 # HILFSFUNKTIONEN
 # ============================================================================
 
-def load_trajectory_dataframe() -> pd.DataFrame | None:
-    if not TRAJECTORY_JSON.is_file():
+def load_dataframe_from_json(json_path: Path, required_columns: set[str] | None = None) -> pd.DataFrame | None:
+    if not json_path.is_file():
         return None
 
-    payload = load_trajectory_payload()
+    payload = load_json_payload(json_path)
 
     if isinstance(payload, dict):
         data = payload.get("simulated_birds")
@@ -63,8 +65,8 @@ def load_trajectory_dataframe() -> pd.DataFrame | None:
 
     df = pd.DataFrame(data)
 
-    required_columns = {"bird_id", "timestamp", "enu_e", "enu_n", "enu_u"}
-    missing_columns = required_columns - set(df.columns)
+    required = required_columns or {"bird_id", "timestamp", "enu_e", "enu_n", "enu_u"}
+    missing_columns = required - set(df.columns)
     if missing_columns:
         return None
 
@@ -73,17 +75,30 @@ def load_trajectory_dataframe() -> pd.DataFrame | None:
         df[coordinate] = pd.to_numeric(df[coordinate], errors="coerce")
 
     df = df.dropna(subset=["bird_id", "timestamp", "enu_e", "enu_n", "enu_u"])
-    df = df.sort_values(["bird_id", "timestamp"])
+    if "bird_id" in df.columns:
+        df = df.sort_values(["bird_id", "timestamp"])
 
     return df if not df.empty else None
 
 
-def load_trajectory_payload() -> dict | list | None:
-    if not TRAJECTORY_JSON.is_file():
+def load_trajectory_dataframe() -> pd.DataFrame | None:
+    return load_dataframe_from_json(TRAJECTORY_JSON)
+
+
+def load_birds_dataframe() -> pd.DataFrame | None:
+    return load_dataframe_from_json(BIRDS_JSON)
+
+
+def load_json_payload(json_path: Path) -> dict | list | None:
+    if not json_path.is_file():
         return None
 
-    with TRAJECTORY_JSON.open("r", encoding="utf-8") as file:
+    with json_path.open("r", encoding="utf-8") as file:
         return json.load(file)
+
+
+def load_trajectory_payload() -> dict | list | None:
+    return load_json_payload(TRAJECTORY_JSON)
 
 
 def extract_trajectory_records(payload: dict | list | None) -> list[dict]:
@@ -95,39 +110,94 @@ def extract_trajectory_records(payload: dict | list | None) -> list[dict]:
     return records if isinstance(records, list) else []
 
 
-def save_trajectory_payload(payload: dict | list | None, records: list[dict]) -> None:
+def save_payload(json_path: Path, payload: dict | list | None, records: list[dict]) -> None:
     if isinstance(payload, dict):
         payload_to_save = dict(payload)
         payload_to_save["simulated_birds"] = records
     else:
         payload_to_save = records
 
-    with TRAJECTORY_JSON.open("w", encoding="utf-8") as file:
+    with json_path.open("w", encoding="utf-8") as file:
         json.dump(payload_to_save, file, ensure_ascii=False, indent=2)
 
 
-def build_figure(
-    trajectory_df: pd.DataFrame | None,
-    pi_setup: list[dict],
-    message: str | None = None,
-    aspect_mode: str = "data",
-) -> go.Figure:
-    fig = go.Figure()
+def save_trajectory_payload(payload: dict | list | None, records: list[dict]) -> None:
+    save_payload(TRAJECTORY_JSON, payload, records)
 
-    if trajectory_df is not None:
-        for bird_id, group in trajectory_df.groupby("bird_id", sort=False):
+
+def save_birds_payload(payload: dict | list | None, records: list[dict]) -> None:
+    save_payload(BIRDS_JSON, payload, records)
+
+
+def collect_visible_bird_positions(records: list[dict]) -> dict[str, list[tuple[float, float, float]]]:
+    grouped_positions: dict[str, list[tuple[float, float, float]]] = {}
+
+    for record in records:
+        bird_id = str(record.get("bird_id") or record.get("determined_bird_id") or "unbekannt")
+        x = to_float(record.get("enu_e"), 0.0)
+        y = to_float(record.get("enu_n"), 0.0)
+        z = to_float(record.get("enu_u"), 0.0)
+        grouped_positions.setdefault(bird_id, []).append((x, y, z))
+
+    return dict(sorted(grouped_positions.items()))
+
+
+def summarize_visible_birds(records: list[dict]) -> list:
+    bird_positions = collect_visible_bird_positions(records)
+
+    if not bird_positions:
+        return [html.Div("Keine sichtbaren Vogelpositionen.", className="mono")]
+
+    summary_items = []
+    for bird_id, positions in bird_positions.items():
+        point_text = "; ".join(
+            f"({x:.2f}, {y:.2f}, {z:.2f})"
+            for x, y, z in positions[:5]
+        )
+        if len(positions) > 5:
+            point_text += " ..."
+        summary_items.append(
+            html.Div(
+                f"{bird_id}: {len(positions)} Position(en) — {point_text}",
+                style={"marginBottom": "4px", "fontFamily": "monospace"},
+            )
+        )
+
+    return summary_items
+
+
+def add_pi_to_bird_vectors(fig: go.Figure, pi_setup: list[dict], records: list[dict], plane_side_length: float) -> None:
+    if not pi_setup or not records:
+        return
+
+    for pi in pi_setup:
+        pi_id = str(pi.get("id", pi.get("name", "pi")))
+        origin_x = to_float(pi.get("x"), 0.0)
+        origin_y = to_float(pi.get("y"), 0.0)
+        origin_z = to_float(pi.get("z"), 0.0)
+
+        for record in records:
+            if not point_in_pi_view_volume(pi, record, plane_side_length):
+                continue
+
+            bird_id = str(record.get("bird_id") or record.get("determined_bird_id") or "unbekannt")
+            projected_point = project_point_to_pi_plane(pi, record, plane_side_length)
+            if projected_point is None:
+                continue
+
             fig.add_trace(
                 go.Scatter3d(
-                    x=group["enu_e"],
-                    y=group["enu_n"],
-                    z=group["enu_u"],
-                    mode="lines+markers",
-                    marker=dict(symbol="circle", size=2),
-                    name=str(bird_id),
-                    text=group["timestamp"].astype(str),
+                    x=[origin_x, projected_point[0]],
+                    y=[origin_y, projected_point[1]],
+                    z=[origin_z, projected_point[2]],
+                    mode="lines",
+                    line=dict(width=2, color="#34d399"),
+                    name=f"{pi_id} → {bird_id}",
+                    showlegend=False,
                     hovertemplate=(
-                        "<b>%{fullData.name}</b><br>"
-                        "Zeit: %{text}<br>"
+                        f"<b>{pi_id}</b><br>"
+                        f"Bird: {bird_id}<br>"
+                        "Von Pi bis Projektion auf der orange Kameraebene<br>"
                         "X: %{x}<br>"
                         "Y: %{y}<br>"
                         "Z: %{z}<extra></extra>"
@@ -135,27 +205,100 @@ def build_figure(
                 )
             )
 
-            dx = group["enu_e"].shift(-1) - group["enu_e"]
-            dy = group["enu_n"].shift(-1) - group["enu_n"]
-            dz = group["enu_u"].shift(-1) - group["enu_u"]
-            vector_mask = dx.notna() & dy.notna() & dz.notna()
+            fig.add_trace(
+                go.Scatter3d(
+                    x=[projected_point[0]],
+                    y=[projected_point[1]],
+                    z=[projected_point[2]],
+                    mode="markers",
+                    marker=dict(size=5, color="orange", symbol="square"),
+                    name=f"{pi_id} Bildpunkt {bird_id}",
+                    showlegend=False,
+                    hovertemplate=(
+                        f"<b>{pi_id}</b><br>"
+                        f"Bird: {bird_id}<br>"
+                        "Projektionspunkt auf der orange Kameraebene<br>"
+                        "X: %{x}<br>"
+                        "Y: %{y}<br>"
+                        "Z: %{z}<extra></extra>"
+                    ),
+                )
+            )
 
-            if vector_mask.any():
+
+def build_figure(
+    trajectory_df: pd.DataFrame | None,
+    pi_setup: list[dict],
+    message: str | None = None,
+    aspect_mode: str = "data",
+    group_by_bird: bool = True,
+    show_projection: bool = False,
+) -> go.Figure:
+    fig = go.Figure()
+
+    if trajectory_df is not None:
+        if group_by_bird:
+            for bird_id, group in trajectory_df.groupby("bird_id", sort=False):
                 fig.add_trace(
-                    go.Cone(
-                        x=group.loc[vector_mask, "enu_e"],
-                        y=group.loc[vector_mask, "enu_n"],
-                        z=group.loc[vector_mask, "enu_u"],
-                        u=dx.loc[vector_mask],
-                        v=dy.loc[vector_mask],
-                        w=dz.loc[vector_mask],
-                        sizemode="absolute",
-                        sizeref=20,
-                        anchor="tail",
-                        showscale=False,
-                        name=f"{bird_id} Richtung",
+                    go.Scatter3d(
+                        x=group["enu_e"],
+                        y=group["enu_n"],
+                        z=group["enu_u"],
+                        mode="lines+markers",
+                        marker=dict(symbol="circle", size=2),
+                        name=str(bird_id),
+                        text=group["timestamp"].astype(str),
+                        hovertemplate=(
+                            "<b>%{fullData.name}</b><br>"
+                            "Zeit: %{text}<br>"
+                            "X: %{x}<br>"
+                            "Y: %{y}<br>"
+                            "Z: %{z}<extra></extra>"
+                        ),
                     )
                 )
+
+                dx = group["enu_e"].shift(-1) - group["enu_e"]
+                dy = group["enu_n"].shift(-1) - group["enu_n"]
+                dz = group["enu_u"].shift(-1) - group["enu_u"]
+                vector_mask = dx.notna() & dy.notna() & dz.notna()
+
+                if vector_mask.any():
+                    fig.add_trace(
+                        go.Cone(
+                            x=group.loc[vector_mask, "enu_e"],
+                            y=group.loc[vector_mask, "enu_n"],
+                            z=group.loc[vector_mask, "enu_u"],
+                            u=dx.loc[vector_mask],
+                            v=dy.loc[vector_mask],
+                            w=dz.loc[vector_mask],
+                            sizemode="absolute",
+                            sizeref=20,
+                            anchor="tail",
+                            showscale=False,
+                            name=f"{bird_id} Richtung",
+                        )
+                    )
+        else:
+            fig.add_trace(
+                go.Scatter3d(
+                    x=trajectory_df["enu_e"],
+                    y=trajectory_df["enu_n"],
+                    z=trajectory_df["enu_u"],
+                    mode="markers",
+                    marker=dict(symbol="circle", size=4, color="#60a5fa"),
+                    name="Vogelpositionen",
+                    text=trajectory_df["bird_id"].astype(str),
+                    hovertemplate=(
+                        "<b>Vogel</b>: %{text}<br>"
+                        "X: %{x}<br>"
+                        "Y: %{y}<br>"
+                        "Z: %{z}<extra></extra>"
+                    ),
+                )
+            )
+            if show_projection:
+                add_pi_to_bird_vectors(fig, pi_setup, trajectory_df.to_dict(orient="records"), CAMERA_PLANE_SIDE_LENGTH)
 
     if pi_setup:
         pi_x = []
@@ -388,6 +531,12 @@ app.layout = html.Div(
                                                     className="btn",
                                                 ),
                                                 html.Button(
+                                                    "Vogel-JSON laden",
+                                                    id="btn-load-birds-json",
+                                                    n_clicks=0,
+                                                    className="btn",
+                                                ),
+                                                html.Button(
                                                     "Punkte in Pyramiden filtern",
                                                     id="btn-filter-pyramid-points",
                                                     n_clicks=0,
@@ -406,6 +555,24 @@ app.layout = html.Div(
                                         ),
 
                                         html.Div(className="divider"),
+
+                                        html.Div(
+                                            id="bird-position-summary",
+                                            children=[
+                                                html.Div(
+                                                    "Keine sichtbaren Vogelpositionen.",
+                                                    className="mono",
+                                                )
+                                            ],
+                                            style={
+                                                "marginTop": "8px",
+                                                "marginBottom": "12px",
+                                                "padding": "8px 10px",
+                                                "border": "1px solid var(--border)",
+                                                "borderRadius": "6px",
+                                                "backgroundColor": "rgba(255,255,255,0.02)",
+                                            },
+                                        ),
 
                                         html.Div(
                                             className="row",
@@ -603,32 +770,36 @@ def render_tab(tab):
 @app.callback(
     Output("main-graph", "figure"),
     Output("action-output", "children"),
+    Output("bird-position-summary", "children"),
     Input("btn-run-trajectory", "n_clicks"),
+    Input("btn-load-birds-json", "n_clicks"),
     Input("btn-filter-pyramid-points", "n_clicks"),
     Input("pi-setup-table", "data"),
     Input("aspect-mode-toggle", "value"),
 )
-def run_trajectory(n_clicks, filter_clicks, pi_setup_rows, aspect_mode):
+def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, pi_setup_rows, aspect_mode):
     pi_setup = normalize_pi_setup(pi_setup_rows)
     view_length = 400.0
 
-    for index, pi in enumerate(pi_setup):
+    for pi in pi_setup:
         pi["view_length"] = view_length
 
     triggered = ctx.triggered_id
-
     status_message = "Status: bereit"
+    summary_children = [html.Div("Keine sichtbaren Vogelpositionen.", className="mono")]
 
     if triggered == "btn-run-trajectory" and (n_clicks or 0) > 0:
         if not TRAJECTORY_SCRIPT.is_file():
+            trajectory_df = load_trajectory_dataframe()
             return (
                 build_figure(
-                    load_trajectory_dataframe(),
+                    trajectory_df,
                     pi_setup,
                     "trajectory.py wurde nicht gefunden.",
                     aspect_mode=aspect_mode or "data",
                 ),
                 f"Status: Datei nicht gefunden: {TRAJECTORY_SCRIPT}",
+                summary_children,
             )
 
         try:
@@ -642,49 +813,89 @@ def run_trajectory(n_clicks, filter_clicks, pi_setup_rows, aspect_mode):
             )
             status_message = "Status: trajectory.py wurde erfolgreich ausgeführt. 3D-Plot geladen."
         except subprocess.TimeoutExpired:
+            trajectory_df = load_trajectory_dataframe()
             return (
                 build_figure(
-                    load_trajectory_dataframe(),
+                    trajectory_df,
                     pi_setup,
                     "Die Berechnung hat das Zeitlimit überschritten.",
                     aspect_mode=aspect_mode or "data",
                 ),
                 f"Status: Abbruch nach {SCRIPT_TIMEOUT_SECONDS} Sekunden.",
+                summary_children,
             )
         except subprocess.CalledProcessError as error:
             details = short_error_message(error.stderr or error.stdout)
+            trajectory_df = load_trajectory_dataframe()
             return (
                 build_figure(
-                    load_trajectory_dataframe(),
+                    trajectory_df,
                     pi_setup,
                     "Fehler beim Ausführen von trajectory.py.",
                     aspect_mode=aspect_mode or "data",
                 ),
                 f"Status: trajectory.py ist fehlgeschlagen: {details}",
+                summary_children,
             )
         except Exception as error:
+            trajectory_df = load_trajectory_dataframe()
             return (
                 build_figure(
-                    load_trajectory_dataframe(),
+                    trajectory_df,
                     pi_setup,
                     "Die Trajektoriendaten konnten nicht geladen werden.",
                     aspect_mode=aspect_mode or "data",
                 ),
                 f"Status: Fehler beim Laden der Daten: {short_error_message(error)}",
+                summary_children,
             )
-    elif triggered == "btn-filter-pyramid-points" and (filter_clicks or 0) > 0:
-        payload = load_trajectory_payload()
-        records = extract_trajectory_records(payload)
-
-        if not records:
+    elif triggered == "btn-load-birds-json" and (load_birds_clicks or 0) > 0:
+        birds_df = load_birds_dataframe()
+        if birds_df is None:
             return (
                 build_figure(
                     load_trajectory_dataframe(),
                     pi_setup,
+                    "Keine Vogel-JSON-Datei gefunden.",
+                    aspect_mode=aspect_mode or "data",
+                    group_by_bird=False,
+                ),
+                "Status: Keine Vogel-JSON-Datei gefunden.",
+                summary_children,
+            )
+
+        status_message = "Status: vogel_flugbahnen.json geladen. Bitte anschließend 'Punkte in Pyramiden filtern' klicken."
+        return (
+            build_figure(
+                birds_df,
+                pi_setup,
+                status_message,
+                aspect_mode=aspect_mode or "data",
+                group_by_bird=False,
+                show_projection=False,
+            ),
+            status_message,
+            summarize_visible_birds(birds_df.to_dict(orient="records")),
+        )
+    elif triggered == "btn-filter-pyramid-points" and (filter_clicks or 0) > 0:
+        payload = load_json_payload(BIRDS_JSON)
+        if payload is None:
+            payload = load_trajectory_payload()
+
+        records = extract_trajectory_records(payload)
+
+        if not records:
+            trajectory_df = load_trajectory_dataframe()
+            return (
+                build_figure(
+                    trajectory_df,
+                    pi_setup,
                     "Keine Trajektoriendaten zum Filtern gefunden.",
                     aspect_mode=aspect_mode or "data",
+                    group_by_bird=False,
                 ),
                 "Status: Keine Trajektoriendaten zum Filtern gefunden.",
+                summary_children,
             )
 
         points_by_pi = points_in_view_volume_for_each_pi(
@@ -699,17 +910,36 @@ def run_trajectory(n_clicks, filter_clicks, pi_setup_rows, aspect_mode):
         }
         filtered_records = [record for record in records if id(record) in matching_point_ids]
 
-        save_trajectory_payload(payload, filtered_records)
+        if BIRDS_JSON.is_file():
+            save_birds_payload(payload, filtered_records)
+        elif TRAJECTORY_JSON.is_file():
+            save_trajectory_payload(payload, filtered_records)
+
+        filtered_df = pd.DataFrame(filtered_records)
 
         deleted_points = len(records) - len(filtered_records)
         status_message = (
             f"Status: {len(filtered_records)} Punkte innerhalb der Pyramiden behalten, "
             f"{deleted_points} Punkte entfernt."
         )
+        return (
+            build_figure(
+                filtered_df,
+                pi_setup,
+                status_message,
+                aspect_mode=aspect_mode or "data",
+                group_by_bird=False,
+                show_projection=True,
+            ),
+            status_message,
+            summarize_visible_birds(filtered_records),
+        )
     elif triggered == "pi-setup-table":
         status_message = "Status: Pi-Setup aktualisiert."
 
     trajectory_df = load_trajectory_dataframe()
+    if trajectory_df is not None:
+        summary_children = summarize_visible_birds(trajectory_df.to_dict(orient="records"))
     return (
         build_figure(
             trajectory_df,
@@ -718,6 +948,7 @@ def run_trajectory(n_clicks, filter_clicks, pi_setup_rows, aspect_mode):
             aspect_mode=aspect_mode or "data",
         ),
         status_message,
+        summary_children,
     )
 
 

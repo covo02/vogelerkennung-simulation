@@ -14,6 +14,7 @@ from pi_view_simulation import (
     perpendicular_square_corners,
     point_in_pi_view_volume,
     points_in_view_volume_for_each_pi,
+    project_point_to_pi_image_coordinates,
     project_point_to_pi_plane,
     to_float,
 )
@@ -36,6 +37,7 @@ TRAJECTORY_JSON = (
 )
 
 BIRDS_JSON = BASE_DIR / "vogel_flugbahnen.json"
+BIRD_IMAGES_JSON = BASE_DIR / "vogel_bilder.json"
 
 
 SCRIPT_TIMEOUT_SECONDS = 300
@@ -101,6 +103,11 @@ def load_trajectory_payload() -> dict | list | None:
     return load_json_payload(TRAJECTORY_JSON)
 
 
+def load_bird_images_payload() -> dict | None:
+    payload = load_json_payload(BIRD_IMAGES_JSON)
+    return payload if isinstance(payload, dict) else None
+
+
 def extract_trajectory_records(payload: dict | list | None) -> list[dict]:
     if isinstance(payload, dict):
         records = payload.get("simulated_birds")
@@ -127,6 +134,272 @@ def save_trajectory_payload(payload: dict | list | None, records: list[dict]) ->
 
 def save_birds_payload(payload: dict | list | None, records: list[dict]) -> None:
     save_payload(BIRDS_JSON, payload, records)
+
+
+def build_time_filter_data(payload: dict | None) -> tuple[list[str], dict[int, str]]:
+    if payload is None:
+        return [], {}
+
+    pi_images = payload.get("pi_images") if isinstance(payload, dict) else None
+    if not isinstance(pi_images, list):
+        return [], {}
+
+    unique_times = set()
+    for pi_entry in pi_images:
+        if not isinstance(pi_entry, dict):
+            continue
+
+        projected_points = pi_entry.get("projected_points")
+        if not isinstance(projected_points, list):
+            continue
+
+        for point in projected_points:
+            if not isinstance(point, dict):
+                continue
+            timestamp = point.get("timestamp")
+            if isinstance(timestamp, str) and timestamp:
+                unique_times.add(timestamp)
+
+    sorted_times = sorted(unique_times)
+    return sorted_times, {index: timestamp for index, timestamp in enumerate(sorted_times)}
+
+
+def build_time_slider_marks(sorted_times: list[str]) -> dict[int, str]:
+    if not sorted_times:
+        return {0: "Alle"}
+
+    marks: dict[int, str] = {}
+    last_index = len(sorted_times) - 1
+    sample_count = min(4, len(sorted_times))
+    if sample_count == 1:
+        sampled_indices = [0]
+    else:
+        sampled_indices = sorted({round(i * last_index / (sample_count - 1)) for i in range(sample_count)})
+
+    for index in sampled_indices:
+        marks[index] = sorted_times[index][11:19]
+
+    marks[len(sorted_times)] = "Alle"
+    return marks
+
+
+def build_camera_2d_figure(pi_entry: dict, points: list[dict], plane_side_length: float) -> go.Figure:
+    half_side = plane_side_length / 2.0
+
+    x_values = [to_float(point.get("image_x"), 0.0) for point in points if isinstance(point, dict)]
+    y_values = [to_float(point.get("image_y"), 0.0) for point in points if isinstance(point, dict)]
+    time_values = [str(point.get("timestamp", "")) for point in points if isinstance(point, dict)]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=y_values,
+            mode="markers",
+            marker=dict(size=8, color="#fb923c", line=dict(width=1, color="#1f2937")),
+            text=time_values,
+            hovertemplate=(
+                "Zeit: %{text}<br>"
+                "x: %{x}<br>"
+                "y: %{y}<extra></extra>"
+            ),
+            name="Projizierte Punkte",
+        )
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        width=600,
+        height=600,
+        margin=dict(l=0, r=0, t=0, b=0),
+        showlegend=False,
+        xaxis=dict(
+            range=[-half_side, half_side],
+            zeroline=True,
+            zerolinecolor="#9ca3af",
+            scaleanchor="y",
+            scaleratio=1,
+            showgrid=False,
+            showticklabels=False,
+            title=None,
+        ),
+        yaxis=dict(
+            range=[-half_side, half_side],
+            zeroline=True,
+            zerolinecolor="#9ca3af",
+            showgrid=False,
+            showticklabels=False,
+            title=None,
+        ),
+    )
+
+    return fig
+
+
+def build_camera_2d_children(time_index: int | None = None) -> tuple[list, str, int, int, dict[int, str], int, bool, str]:
+    payload = load_bird_images_payload()
+    if payload is None:
+        return (
+            [html.Div("Keine Projektionen gefunden. Bitte zuerst filtern.", className="mono")],
+            "Status: Keine Projektionen verfügbar.",
+            0,
+            0,
+            {0: "Alle"},
+            0,
+            True,
+            "Zeitfilter: Keine Daten",
+        )
+
+    pi_images = payload.get("pi_images") if isinstance(payload, dict) else None
+    if not isinstance(pi_images, list) or not pi_images:
+        return (
+            [html.Div("Keine Pi-Bilddaten gefunden.", className="mono")],
+            "Status: Keine Pi-Bilddaten verfügbar.",
+            0,
+            0,
+            {0: "Alle"},
+            0,
+            True,
+            "Zeitfilter: Keine Daten",
+        )
+
+    meta = payload.get("projection_meta", {}) if isinstance(payload, dict) else {}
+    plane_side_length = to_float(meta.get("plane_side_length"), 600.0)
+    sorted_times, index_to_time = build_time_filter_data(payload)
+
+    slider_min = 0
+    slider_max = len(sorted_times)
+    slider_disabled = len(sorted_times) == 0
+
+    if time_index is None:
+        current_index = slider_max
+    else:
+        current_index = max(slider_min, min(time_index, slider_max))
+
+    show_all_times = current_index == slider_max
+    selected_time = None if show_all_times else index_to_time.get(current_index)
+    time_label = "Zeitfilter: Alle Zeiten" if show_all_times else f"Zeitfilter: {selected_time}"
+    marks = build_time_slider_marks(sorted_times)
+
+    children = []
+    total_points = 0
+    for pi_entry in pi_images:
+        if not isinstance(pi_entry, dict):
+            continue
+
+        pi_id = str(pi_entry.get("pi_id", "pi"))
+        projected_points_raw = pi_entry.get("projected_points", [])
+        projected_points = projected_points_raw if isinstance(projected_points_raw, list) else []
+        if selected_time is not None:
+            projected_points = [
+                point for point in projected_points
+                if isinstance(point, dict) and str(point.get("timestamp", "")) == selected_time
+            ]
+
+        point_count = len(projected_points)
+        total_points += point_count
+        figure = build_camera_2d_figure(pi_entry, projected_points, plane_side_length)
+
+        children.append(
+            html.Div(
+                style={"marginBottom": "16px", "display": "flex", "flexDirection": "column", "alignItems": "center"},
+                children=[
+                    html.Div(
+                        f"Pi: {pi_id}",
+                        className="mono",
+                        style={"marginBottom": "8px", "fontWeight": "700", "color": "var(--text)"},
+                    ),
+                    dcc.Graph(
+                        figure=figure,
+                        config={"responsive": False},
+                        style={"width": "600px", "height": "600px"},
+                    ),
+                ],
+            )
+        )
+
+    status_text = f"Status: {len(children)} Pi-Ansichten mit insgesamt {total_points} projizierten Punkten geladen."
+    return (
+        children or [html.Div("Keine Pi-Bilddaten gefunden.", className="mono")],
+        status_text,
+        slider_min,
+        slider_max,
+        marks,
+        current_index,
+        slider_disabled,
+        time_label,
+    )
+
+
+def save_projected_bird_images(
+    pi_setup: list[dict],
+    points_by_pi: dict[str, list[dict]],
+    plane_side_length: float,
+    source_file: str,
+) -> None:
+    projection_payload: dict[str, object] = {
+        "projection_meta": {
+            "image_center": {"x": 0.0, "y": 0.0},
+            "plane_side_length": plane_side_length,
+            "source_file": source_file,
+        },
+        "pi_images": [],
+    }
+
+    pi_by_id = {str(pi.get("id", pi.get("name", "pi"))): pi for pi in pi_setup}
+
+    for pi_id, points in points_by_pi.items():
+        pi = pi_by_id.get(pi_id)
+        if pi is None:
+            continue
+
+        yaw_deg = to_float(pi.get("yaw_deg", pi.get("view_horizontal_deg")), 0.0)
+        pitch_deg = to_float(pi.get("pitch_deg", pi.get("view_vertical_deg")), 0.0)
+        roll_deg = to_float(pi.get("roll_deg"), 0.0)
+        view_length = to_float(pi.get("view_length"), 400.0)
+        view_x, view_y, view_z = compute_view_vector(yaw_deg, pitch_deg, roll_deg, view_length)
+        pi_x = to_float(pi.get("x"), 0.0)
+        pi_y = to_float(pi.get("y"), 0.0)
+        pi_z = to_float(pi.get("z"), 0.0)
+
+        projected_points = []
+        for point in points:
+            image_coordinates = project_point_to_pi_image_coordinates(
+                pi,
+                point,
+                plane_side_length,
+            )
+            if image_coordinates is None:
+                continue
+
+            timestamp = point.get("timestamp")
+            projected_points.append(
+                {
+                    "timestamp": timestamp,
+                    "image_x": round(image_coordinates[0], 6),
+                    "image_y": round(image_coordinates[1], 6),
+                }
+            )
+
+        projection_payload["pi_images"].append(
+            {
+                "pi_id": pi_id,
+                "pi_position": {
+                    "x": round(pi_x, 6),
+                    "y": round(pi_y, 6),
+                    "z": round(pi_z, 6),
+                },
+                "view_direction_vector": {
+                    "x": round(view_x, 6),
+                    "y": round(view_y, 6),
+                    "z": round(view_z, 6),
+                },
+                "projected_points": projected_points,
+            }
+        )
+
+    with BIRD_IMAGES_JSON.open("w", encoding="utf-8") as file:
+        json.dump(projection_payload, file, ensure_ascii=False, indent=2)
 
 
 def collect_visible_bird_positions(records: list[dict]) -> dict[str, list[tuple[float, float, float]]]:
@@ -493,6 +766,12 @@ app.layout = html.Div(
                             selected_className="custom-tab--selected",
                         ),
                         dcc.Tab(
+                            label="2D-Kamerabild",
+                            value="tab-4",
+                            className="custom-tab",
+                            selected_className="custom-tab--selected",
+                        ),
+                        dcc.Tab(
                             label="Vogelgenerierung",
                             value="tab-generate",
                             className="custom-tab",
@@ -733,6 +1012,46 @@ app.layout = html.Div(
                                 ),
                             ],
                         ),
+                        html.Div(
+                            id="tab-4-content",
+                            style={"display": "none"},
+                            children=[
+                                html.Div(
+                                    id="camera-2d-status",
+                                    children="",
+                                    style={"display": "none"},
+                                ),
+                                html.Div(
+                                    id="camera-time-label",
+                                    children="Zeitfilter: Alle Zeiten",
+                                    className="mono",
+                                    style={"marginBottom": "8px", "color": "var(--muted)"},
+                                ),
+                                html.Div(
+                                    style={"marginBottom": "12px"},
+                                    children=[
+                                        dcc.Slider(
+                                            id="camera-time-slider",
+                                            min=0,
+                                            max=0,
+                                            step=1,
+                                            value=0,
+                                            marks={0: "Alle"},
+                                            included=False,
+                                            updatemode="drag",
+                                            disabled=True,
+                                        ),
+                                    ],
+                                ),
+                                html.Div(
+                                    id="camera-2d-container",
+                                    style={"display": "flex", "flexDirection": "column", "alignItems": "center"},
+                                    children=[
+                                        html.Div("Keine Projektionen vorhanden.", className="mono")
+                                    ],
+                                ),
+                            ],
+                        ),
                         bird_generator_tab(),
                     ],
                 ),
@@ -749,6 +1068,7 @@ app.layout = html.Div(
     Output("tab-1-content", "style"),
     Output("tab-2-content", "style"),
     Output("tab-3-content", "style"),
+    Output("tab-4-content", "style"),
     Output("tab-generate-content", "style"),
     Input("tabs", "value"),
 )
@@ -756,15 +1076,38 @@ def render_tab(tab):
     visible = {"display": "block"}
     hidden = {"display": "none"}
     if tab == "tab-1":
-        return visible, hidden, hidden, hidden
+        return visible, hidden, hidden, hidden, hidden
 
     if tab == "tab-2":
-        return hidden, visible, hidden, hidden
+        return hidden, visible, hidden, hidden, hidden
 
     if tab == "tab-3":
-        return hidden, hidden, visible, hidden
+        return hidden, hidden, visible, hidden, hidden
 
-    return hidden, hidden, hidden, visible
+    if tab == "tab-4":
+        return hidden, hidden, hidden, visible, hidden
+
+    return hidden, hidden, hidden, hidden, visible
+
+
+@app.callback(
+    Output("camera-2d-container", "children"),
+    Output("camera-2d-status", "children"),
+    Output("camera-time-slider", "min"),
+    Output("camera-time-slider", "max"),
+    Output("camera-time-slider", "marks"),
+    Output("camera-time-slider", "value"),
+    Output("camera-time-slider", "disabled"),
+    Output("camera-time-label", "children"),
+    Input("tabs", "value"),
+    Input("btn-filter-pyramid-points", "n_clicks"),
+    Input("camera-time-slider", "value"),
+)
+def update_camera_2d_tab(tab_value, _filter_clicks, slider_value):
+    if tab_value != "tab-4":
+        return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
+
+    return build_camera_2d_children(slider_value)
 
 
 @app.callback(
@@ -879,8 +1222,10 @@ def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, pi_setup_rows, as
         )
     elif triggered == "btn-filter-pyramid-points" and (filter_clicks or 0) > 0:
         payload = load_json_payload(BIRDS_JSON)
+        source_file = BIRDS_JSON.name
         if payload is None:
             payload = load_trajectory_payload()
+            source_file = TRAJECTORY_JSON.name
 
         records = extract_trajectory_records(payload)
 
@@ -915,12 +1260,19 @@ def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, pi_setup_rows, as
         elif TRAJECTORY_JSON.is_file():
             save_trajectory_payload(payload, filtered_records)
 
+        save_projected_bird_images(
+            pi_setup,
+            points_by_pi,
+            CAMERA_PLANE_SIDE_LENGTH,
+            source_file,
+        )
+
         filtered_df = pd.DataFrame(filtered_records)
 
         deleted_points = len(records) - len(filtered_records)
         status_message = (
             f"Status: {len(filtered_records)} Punkte innerhalb der Pyramiden behalten, "
-            f"{deleted_points} Punkte entfernt."
+            f"{deleted_points} Punkte entfernt. Projektionen in {BIRD_IMAGES_JSON.name} gespeichert."
         )
         return (
             build_figure(

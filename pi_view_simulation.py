@@ -10,7 +10,7 @@ def default_pi_setup() -> list[dict[str, float | str]]:
             "x": 0.0,
             "y": 0.0,
             "z": 0.0,
-            "yaw_deg": 0.0,
+            "yaw_deg": 40.0,
             "pitch_deg": 45.0,
             "roll_deg": 0.0,
             "view_length": 400.0,
@@ -18,10 +18,10 @@ def default_pi_setup() -> list[dict[str, float | str]]:
         {
             "id": "pi_2",
             "name": "Raspberry Pi X-Achse",
-            "x": 600.0,
+            "x": 300.0,
             "y": 0.0,
             "z": 0.0,
-            "yaw_deg": 180.0,
+            "yaw_deg": 100.0,
             "pitch_deg": 45.0,
             "roll_deg": 0.0,
             "view_length": 400.0,
@@ -30,9 +30,9 @@ def default_pi_setup() -> list[dict[str, float | str]]:
             "id": "pi_3",
             "name": "Raspberry Pi Y-Achse",
             "x": 0.0,
-            "y": 600.0,
+            "y": 300.0,
             "z": 0.0,
-            "yaw_deg": 90.0,
+            "yaw_deg": 280.0,
             "pitch_deg": 45.0,
             "roll_deg": 0.0,
             "view_length": 400.0,
@@ -341,6 +341,68 @@ def project_point_to_pi_plane(
         plane_center[2] + basis_u[2] * projected_u + basis_v[2] * projected_v,
     )
     return projected_point
+
+
+def project_point_to_pi_image_coordinates(
+    pi: dict[str, Any],
+    point: dict[str, Any],
+    plane_side_length: float,
+    point_x_key: str = "enu_e",
+    point_y_key: str = "enu_n",
+    point_z_key: str = "enu_u",
+) -> tuple[float, float] | None:
+    """Projiziert einen Punkt auf die Kameraebene als 2D-Koordinaten mit Bildzentrum (0, 0)."""
+    origin_x = to_float(pi.get("x"), 0.0)
+    origin_y = to_float(pi.get("y"), 0.0)
+    origin_z = to_float(pi.get("z"), 0.0)
+    yaw_deg = to_float(pi.get("yaw_deg", pi.get("view_horizontal_deg")), 0.0)
+    pitch_deg = to_float(pi.get("pitch_deg", pi.get("view_vertical_deg")), 0.0)
+    roll_deg = to_float(pi.get("roll_deg"), 0.0)
+    view_length = to_float(pi.get("view_length"), 400.0)
+
+    if view_length <= 1e-12:
+        return None
+
+    point_x = to_float(point.get(point_x_key), 0.0)
+    point_y = to_float(point.get(point_y_key), 0.0)
+    point_z = to_float(point.get(point_z_key), 0.0)
+
+    view_x, view_y, view_z = compute_view_vector(yaw_deg, pitch_deg, roll_deg, view_length)
+    direction_unit, basis_u, basis_v = square_plane_basis(view_x, view_y, view_z)
+
+    delta_x = point_x - origin_x
+    delta_y = point_y - origin_y
+    delta_z = point_z - origin_z
+
+    forward_distance = (
+        delta_x * direction_unit[0]
+        + delta_y * direction_unit[1]
+        + delta_z * direction_unit[2]
+    )
+
+    if forward_distance <= 0.0 or forward_distance > view_length:
+        return None
+
+    lateral_u = (
+        delta_x * basis_u[0]
+        + delta_y * basis_u[1]
+        + delta_z * basis_u[2]
+    )
+    lateral_v = (
+        delta_x * basis_v[0]
+        + delta_y * basis_v[1]
+        + delta_z * basis_v[2]
+    )
+
+    max_offset = (plane_side_length / 2.0) * (forward_distance / view_length)
+    tolerance = 1e-9
+    if abs(lateral_u) > max_offset + tolerance or abs(lateral_v) > max_offset + tolerance:
+        return None
+
+    projected_u = (lateral_u / max_offset) * (plane_side_length / 2.0) if max_offset > 1e-12 else 0.0
+    projected_v = (lateral_v / max_offset) * (plane_side_length / 2.0) if max_offset > 1e-12 else 0.0
+
+    return (projected_u, projected_v)
 
 
 def points_in_view_volume_for_each_pi(

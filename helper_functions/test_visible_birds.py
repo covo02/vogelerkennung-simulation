@@ -1,5 +1,5 @@
 from webinterface import collect_visible_bird_positions
-from pi_view_simulation import points_in_view_volume_for_each_pi_with_origin
+from helper_functions.pi_view_simulation import points_in_view_volume_for_each_pi_with_origin
 
 
 def test_collect_visible_bird_positions_groups_points_by_bird():

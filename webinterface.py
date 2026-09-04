@@ -22,6 +22,12 @@ from helper_functions.pi_view_simulation import (
 from helper_functions.additional_styles import ERROR_STATUS_STYLE, SUCCESS_STATUS_STYLE
 from helper_functions.bird_generation import generate_birds, parse_generation_parameters
 from helper_functions.bird_generation_layout import bird_generator_tab
+from helper_functions.detected_positions import (
+    add_detected_vectors_to_figure,
+    build_detected_positions_payload,
+    load_detected_positions_payload,
+    save_detected_positions_payload,
+)
 from helper_functions.generate_plots import create_bird_stats, create_birds_2d_figure, create_birds_3d_figure, status_figure
 
 
@@ -38,6 +44,7 @@ TRAJECTORY_JSON = (
 
 BIRDS_JSON = BASE_DIR / "vogel_flugbahnen.json"
 BIRD_IMAGES_JSON = BASE_DIR / "vogel_bilder.json"
+DETECTED_POSITIONS_JSON = BASE_DIR / "vogel_position_erkannt.json"
 
 
 SCRIPT_TIMEOUT_SECONDS = 300
@@ -506,10 +513,14 @@ def build_figure(
     aspect_mode: str = "data",
     group_by_bird: bool = True,
     show_projection: bool = False,
+    show_detected_vectors_only: bool = False,
+    detected_vectors_payload: dict | None = None,
 ) -> go.Figure:
     fig = go.Figure()
 
-    if trajectory_df is not None:
+    if show_detected_vectors_only:
+        add_detected_vectors_to_figure(fig, detected_vectors_payload)
+    elif trajectory_df is not None:
         if group_by_bird:
             for bird_id, group in trajectory_df.groupby("bird_id", sort=False):
                 fig.add_trace(
@@ -573,7 +584,7 @@ def build_figure(
             if show_projection:
                 add_pi_to_bird_vectors(fig, pi_setup, trajectory_df.to_dict(orient="records"), CAMERA_PLANE_SIDE_LENGTH)
 
-    if pi_setup:
+    if pi_setup and not show_detected_vectors_only:
         pi_x = []
         pi_y = []
         pi_z = []
@@ -818,6 +829,12 @@ app.layout = html.Div(
                                                 html.Button(
                                                     "Punkte in Pyramiden filtern",
                                                     id="btn-filter-pyramid-points",
+                                                    n_clicks=0,
+                                                    className="btn",
+                                                ),
+                                                html.Button(
+                                                    "Position bestimmen",
+                                                    id="btn-determine-position",
                                                     n_clicks=0,
                                                     className="btn",
                                                 ),
@@ -1117,10 +1134,11 @@ def update_camera_2d_tab(tab_value, _filter_clicks, slider_value):
     Input("btn-run-trajectory", "n_clicks"),
     Input("btn-load-birds-json", "n_clicks"),
     Input("btn-filter-pyramid-points", "n_clicks"),
+    Input("btn-determine-position", "n_clicks"),
     Input("pi-setup-table", "data"),
     Input("aspect-mode-toggle", "value"),
 )
-def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, pi_setup_rows, aspect_mode):
+def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, determine_position_clicks, pi_setup_rows, aspect_mode):
     pi_setup = normalize_pi_setup(pi_setup_rows)
     view_length = 400.0
 
@@ -1285,6 +1303,95 @@ def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, pi_setup_rows, as
             ),
             status_message,
             summarize_visible_birds(filtered_records),
+        )
+    elif triggered == "btn-determine-position" and (determine_position_clicks or 0) > 0:
+        detected_payload = build_detected_positions_payload(BIRD_IMAGES_JSON)
+        if not isinstance(detected_payload, dict):
+            message = f"Status: Keine gültigen Daten in {BIRD_IMAGES_JSON.name} gefunden."
+            return (
+                build_figure(
+                    None,
+                    pi_setup,
+                    message,
+                    aspect_mode=aspect_mode or "data",
+                    show_detected_vectors_only=True,
+                    detected_vectors_payload=None,
+                ),
+                message,
+                [html.Div("Keine erkannten Vektorpositionen verfügbar.", className="mono")],
+            )
+
+        vectors = detected_payload.get("detected_vectors")
+        vector_count = len(vectors) if isinstance(vectors, list) else 0
+        if vector_count == 0:
+            message = (
+                f"Status: In {BIRD_IMAGES_JSON.name} wurden keine projizierten Punkte gefunden."
+            )
+            return (
+                build_figure(
+                    None,
+                    pi_setup,
+                    message,
+                    aspect_mode=aspect_mode or "data",
+                    show_detected_vectors_only=True,
+                    detected_vectors_payload=detected_payload,
+                ),
+                message,
+                [html.Div("Keine erkannten Vektorpositionen verfügbar.", className="mono")],
+            )
+
+        save_detected_positions_payload(DETECTED_POSITIONS_JSON, detected_payload)
+        saved_payload = load_detected_positions_payload(DETECTED_POSITIONS_JSON)
+        if not isinstance(saved_payload, dict):
+            message = f"Status: Fehler beim Speichern von {DETECTED_POSITIONS_JSON.name}."
+            return (
+                build_figure(
+                    None,
+                    pi_setup,
+                    message,
+                    aspect_mode=aspect_mode or "data",
+                    show_detected_vectors_only=True,
+                    detected_vectors_payload=None,
+                ),
+                message,
+                [html.Div("Keine erkannten Vektorpositionen verfügbar.", className="mono")],
+            )
+
+        saved_vectors = saved_payload.get("detected_vectors") if isinstance(saved_payload, dict) else None
+        saved_vector_count = len(saved_vectors) if isinstance(saved_vectors, list) else 0
+        pi_count = len(
+            {
+                str(vector.get("pi_id", "pi"))
+                for vector in (saved_vectors or [])
+                if isinstance(vector, dict)
+            }
+        )
+        status_message = (
+            f"Status: {saved_vector_count} Vektoren aus {BIRD_IMAGES_JSON.name} erstellt und in "
+            f"{DETECTED_POSITIONS_JSON.name} gespeichert."
+        )
+        overlap_entries = saved_payload.get("overlaps") if isinstance(saved_payload, dict) else None
+        overlap_count = len(overlap_entries) if isinstance(overlap_entries, list) else 0
+        summary = [
+            html.Div(
+                (
+                    f"Erkannte Positionen: {saved_vector_count} Vektoren von {pi_count} Pi(s). "
+                    f"Ueberlappungen pro Zeitstempel: {overlap_count}."
+                ),
+                className="mono",
+            )
+        ]
+        return (
+            build_figure(
+                None,
+                pi_setup,
+                status_message,
+                aspect_mode=aspect_mode or "data",
+                show_detected_vectors_only=True,
+                detected_vectors_payload=saved_payload,
+            ),
+            status_message,
+            summary,
         )
     elif triggered == "pi-setup-table":
         status_message = "Status: Pi-Setup aktualisiert."

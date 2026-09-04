@@ -7,7 +7,7 @@ import dash
 import pandas as pd
 import plotly.graph_objects as go
 from dash import Input, Output, State, ctx, dash_table, dcc, html, no_update
-from pi_view_simulation import (
+from helper_functions.pi_view_simulation import (
     compute_view_vector,
     default_pi_setup,
     normalize_pi_setup,
@@ -20,7 +20,7 @@ from pi_view_simulation import (
 )
 
 from helper_functions.additional_styles import ERROR_STATUS_STYLE, SUCCESS_STATUS_STYLE
-from helper_functions.bird_generation import build_pi_devices, generate_birds, parse_generation_parameters
+from helper_functions.bird_generation import generate_birds, parse_generation_parameters
 from helper_functions.bird_generation_layout import bird_generator_tab
 from helper_functions.generate_plots import create_bird_stats, create_birds_2d_figure, create_birds_3d_figure, status_figure
 
@@ -1395,19 +1395,10 @@ def generate_birds_json(
         )
 
         records = generate_birds(**parameters)
-
-        pi_devices = build_pi_devices(
-            parameters["x_min"],
-            parameters["x_max"],
-            parameters["y_min"],
-            parameters["y_max"],
-        )
-
         output_data = {
             "plotAttachment": {
                 "version": "1.0",
                 "type": "triangulation_setup",
-                "devices": pi_devices,
             },
             "simulated_birds": records,
         }
@@ -1427,7 +1418,6 @@ def generate_birds_json(
 
         figure_3d = create_birds_3d_figure(
             df,
-            pi_devices,
             parameters["z_min"],
             parameters["z_max"],
         )

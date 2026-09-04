@@ -128,32 +128,6 @@ def parse_seed(seed_value):
         return int.from_bytes(digest[:8], byteorder="big")
 
 
-def build_pi_devices(x_min, x_max, y_min, y_max):
-    """Erstellt die Raspberry-Pi-Positionen."""
-    return [
-        {
-            "id": "pi_1",
-            "name": "Raspberry Pi Ursprung",
-            "x": x_min,
-            "y": y_min,
-            "z": 0,
-        },
-        {
-            "id": "pi_2",
-            "name": "Raspberry Pi X-Achse",
-            "x": x_max,
-            "y": y_min,
-            "z": 0,
-        },
-        {
-            "id": "pi_3",
-            "name": "Raspberry Pi Y-Achse",
-            "x": x_min,
-            "y": y_max,
-            "z": 0,
-        },
-    ]
-
 # ============================================================================
 # HILFSFUNKTIONEN: VALIDIERUNG
 # ============================================================================

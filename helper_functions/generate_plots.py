@@ -59,7 +59,7 @@ def create_birds_2d_figure(df):
     return fig
 
 
-def create_birds_3d_figure(df, pi_devices, z_min, z_max):
+def create_birds_3d_figure(df, z_min, z_max):
     """Erstellt die 3D-Ansicht der generierten Flugbahnen."""
     sorted_df = df.sort_values(["bird_id", "timestamp"])
     unique_birds = sorted_df["bird_id"].drop_duplicates().tolist()
@@ -101,31 +101,6 @@ def create_birds_3d_figure(df, pi_devices, z_min, z_max):
                 ),
             )
         )
-
-    pi_x = [device["x"] for device in pi_devices]
-    pi_y = [device["y"] for device in pi_devices]
-    pi_z = [device["z"] for device in pi_devices]
-    pi_names = [
-        f"{device['name']} ({device['id']})"
-        for device in pi_devices
-    ]
-
-    fig.add_trace(
-        go.Scatter3d(
-            x=pi_x,
-            y=pi_y,
-            z=pi_z,
-            mode="markers+text",
-            marker={
-                "size": 10,
-                "color": "red",
-                "symbol": "diamond",
-            },
-            text=pi_names,
-            textposition="top center",
-            name="Raspberry Pis",
-        )
-    )
 
     z_lower = min(0, z_min)
     z_upper = max(0, z_max)

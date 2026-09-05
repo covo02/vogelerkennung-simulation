@@ -730,9 +730,6 @@ def short_error_message(error) -> str:
 app.layout = html.Div(
     className="container",
     children=[
-        # Download-Komponente
-        dcc.Download(id="download-json"),
-
         html.Div(
             className="header",
             children=[
@@ -759,14 +756,8 @@ app.layout = html.Div(
                     className="custom-tabs",
                     children=[
                         dcc.Tab(
-                            label="Übersicht",
-                            value="tab-1",
-                            className="custom-tab",
-                            selected_className="custom-tab--selected",
-                        ),
-                        dcc.Tab(
-                            label="Daten",
-                            value="tab-2",
+                            label="Vogelgenerierung",
+                            value="tab-generate",
                             className="custom-tab",
                             selected_className="custom-tab--selected",
                         ),
@@ -777,14 +768,20 @@ app.layout = html.Div(
                             selected_className="custom-tab--selected",
                         ),
                         dcc.Tab(
-                            label="2D-Kamerabild",
-                            value="tab-4",
+                            label="Übersicht",
+                            value="tab-1",
                             className="custom-tab",
                             selected_className="custom-tab--selected",
                         ),
                         dcc.Tab(
-                            label="Vogelgenerierung",
-                            value="tab-generate",
+                            label="Trajektorie berechnen",
+                            value="tab-2",
+                            className="custom-tab",
+                            selected_className="custom-tab--selected",
+                        ),
+                        dcc.Tab(
+                            label="2D-Kamerabild",
+                            value="tab-4",
                             className="custom-tab",
                             selected_className="custom-tab--selected",
                         ),
@@ -794,6 +791,73 @@ app.layout = html.Div(
                 html.Div(
                     style={"padding": "12px"},
                     children=[
+                        bird_generator_tab(),
+                        html.Div(
+                            id="tab-3-content",
+                            style={"display": "none"},
+                            children=[
+                                html.Div(
+                                    className="card",
+                                    children=[
+                                        html.Div(
+                                            className="cardTitle",
+                                            children=[
+                                                html.H2("Kameras"),
+                                                html.Span("editierbar", className="badge"),
+                                            ],
+                                        ),
+
+                                        dash_table.DataTable(
+                                            id="pi-setup-table",
+                                            data=default_pi_setup(),
+                                            columns=[
+                                                {"name": "Name", "id": "name", "editable": False},
+                                                {"name": "X", "id": "x", "type": "numeric"},
+                                                {"name": "Y", "id": "y", "type": "numeric"},
+                                                {"name": "Z", "id": "z", "type": "numeric"},
+                                                {"name": "Yaw um Z [°]", "id": "yaw_deg", "type": "numeric"},
+                                                {"name": "Pitch hoch/runter [°]", "id": "pitch_deg", "type": "numeric"},
+                                                {"name": "Roll [°]", "id": "roll_deg", "type": "numeric"},
+                                            ],
+                                            editable=True,
+                                            row_deletable=False,
+                                            sort_action="none",
+                                            style_table={"overflowX": "auto"},
+                                            style_cell={
+                                                "backgroundColor": "rgba(255,255,255,0.02)",
+                                                "color": "var(--text)",
+                                                "border": "1px solid var(--border)",
+                                                "padding": "8px",
+                                                "fontFamily": "inherit",
+                                                "fontSize": "13px",
+                                            },
+                                            style_header={
+                                                "backgroundColor": "rgba(255,255,255,0.05)",
+                                                "fontWeight": "700",
+                                                "color": "var(--text)",
+                                                "border": "1px solid var(--border)",
+                                            },
+                                            style_data_conditional=[
+                                                {"if": {"row_index": "odd"}, "backgroundColor": "rgba(255,255,255,0.015)"},
+                                                {"if": {"column_id": "name"}, "fontWeight": "700"},
+                                                {
+                                                    "if": {"state": "active"},
+                                                    "backgroundColor": "rgba(28,35,48,0.96)",
+                                                    "color": "#e7eaf0",
+                                                    "border": "1px solid rgba(42,98,255,0.45)",
+                                                },
+                                                {
+                                                    "if": {"state": "selected"},
+                                                    "backgroundColor": "rgba(34,42,58,0.96)",
+                                                    "color": "#e7eaf0",
+                                                    "border": "1px solid rgba(42,98,255,0.45)",
+                                                },
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        ),
                         html.Div(
                             id="tab-1-content",
                             children=[
@@ -803,7 +867,7 @@ app.layout = html.Div(
                                         html.Div(
                                             className="cardTitle",
                                             children=[
-                                                html.H2("Trajektorie berechnen"),
+                                                html.H2("Triangulation simulieren"),
                                                 html.Span(
                                                     "trajectory.py",
                                                     className="badge",
@@ -814,12 +878,6 @@ app.layout = html.Div(
                                         html.Div(
                                             className="row",
                                             children=[
-                                                html.Button(
-                                                    "Trajektorie berechnen",
-                                                    id="btn-run-trajectory",
-                                                    n_clicks=0,
-                                                    className="btn",
-                                                ),
                                                 html.Button(
                                                     "Vogel-JSON laden",
                                                     id="btn-load-birds-json",
@@ -837,15 +895,6 @@ app.layout = html.Div(
                                                     id="btn-determine-position",
                                                     n_clicks=0,
                                                     className="btn",
-                                                ),
-                                                html.Div(
-                                                    "Status: bereit",
-                                                    id="action-output",
-                                                    className="mono",
-                                                    style={
-                                                        "marginLeft": "10px",
-                                                        "color": "var(--muted)",
-                                                    },
                                                 ),
                                             ],
                                         ),
@@ -943,87 +992,21 @@ app.layout = html.Div(
                                             className="row",
                                             children=[
                                                 html.Button(
-                                                    "JSON herunterladen",
-                                                    id="btn-download-json",
+                                                    "Trajektorie berechnen",
+                                                    id="btn-run-trajectory",
                                                     n_clicks=0,
                                                     className="btn",
                                                 ),
-                                                html.Div(
-                                                    "",
-                                                    id="download-status",
-                                                    className="mono",
-                                                    style={
-                                                        "marginLeft": "10px",
-                                                        "color": "var(--muted)",
-                                                    },
-                                                ),
-                                            ]
-                                        )
-                                    ],
-                                ),
-                            ],
-                        ),
-                        html.Div(
-                            id="tab-3-content",
-                            style={"display": "none"},
-                            children=[
-                                html.Div(
-                                    className="card",
-                                    children=[
-                                        html.Div(
-                                            className="cardTitle",
-                                            children=[
-                                                html.H2("Kameras"),
-                                                html.Span("editierbar", className="badge"),
                                             ],
                                         ),
-
-                                        dash_table.DataTable(
-                                            id="pi-setup-table",
-                                            data=default_pi_setup(),
-                                            columns=[
-                                                {"name": "Name", "id": "name", "editable": False},
-                                                {"name": "X", "id": "x", "type": "numeric"},
-                                                {"name": "Y", "id": "y", "type": "numeric"},
-                                                {"name": "Z", "id": "z", "type": "numeric"},
-                                                {"name": "Yaw um Z [°]", "id": "yaw_deg", "type": "numeric"},
-                                                {"name": "Pitch hoch/runter [°]", "id": "pitch_deg", "type": "numeric"},
-                                                {"name": "Roll [°]", "id": "roll_deg", "type": "numeric"},
-                                            ],
-                                            editable=True,
-                                            row_deletable=False,
-                                            sort_action="none",
-                                            style_table={"overflowX": "auto"},
-                                            style_cell={
-                                                "backgroundColor": "rgba(255,255,255,0.02)",
-                                                "color": "var(--text)",
-                                                "border": "1px solid var(--border)",
-                                                "padding": "8px",
-                                                "fontFamily": "inherit",
-                                                "fontSize": "13px",
+                                        html.Div(
+                                            "Status: bereit",
+                                            id="action-output",
+                                            className="mono",
+                                            style={
+                                                "marginLeft": "10px",
+                                                "color": "var(--muted)",
                                             },
-                                            style_header={
-                                                "backgroundColor": "rgba(255,255,255,0.05)",
-                                                "fontWeight": "700",
-                                                "color": "var(--text)",
-                                                "border": "1px solid var(--border)",
-                                            },
-                                            style_data_conditional=[
-                                                {"if": {"row_index": "odd"}, "backgroundColor": "rgba(255,255,255,0.015)"},
-                                                {"if": {"column_id": "name"}, "fontWeight": "700"},
-                                                {
-                                                    "if": {"state": "active"},
-                                                    "backgroundColor": "rgba(28,35,48,0.96)",
-                                                    "color": "#e7eaf0",
-                                                    "border": "1px solid rgba(42,98,255,0.45)",
-                                                },
-                                                {
-                                                    "if": {"state": "selected"},
-                                                    "backgroundColor": "rgba(34,42,58,0.96)",
-                                                    "color": "#e7eaf0",
-                                                    "border": "1px solid rgba(42,98,255,0.45)",
-                                                },
-                                            ],
                                         ),
                                     ],
                                 ),
@@ -1069,7 +1052,7 @@ app.layout = html.Div(
                                 ),
                             ],
                         ),
-                        bird_generator_tab(),
+                        
                     ],
                 ),
             ],
@@ -1409,24 +1392,6 @@ def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, determine_positio
         status_message,
         summary_children,
     )
-
-
-@app.callback(
-    Output("download-json", "data"),
-    Output("download-status", "children"),
-    Input("btn-download-json", "n_clicks"),
-    prevent_initial_call=True,
-)
-def download_json(n_clicks):
-    """Prüft die Datei und startet den Download oder zeigt einen Fehler an."""
-    if TRAJECTORY_JSON.is_file():
-        return dcc.send_file(
-            str(TRAJECTORY_JSON),
-            filename=TRAJECTORY_JSON.name
-        ), "Status: Datei gefunden, Download gestartet."
-    
-    return None, "Status: Datei nicht verfügbar. Bitte zuerst berechnen."
-
 
 # ============================================================================
 # CALLBACKS: VOGELGENERIERUNG

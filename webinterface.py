@@ -1486,6 +1486,7 @@ def run_trajectory_plot(n_clicks, pi_setup_rows, aspect_mode):
     State("gen-variance-speed", "value"),
     State("gen-variance-z", "value"),
     State("gen-variance-vertical-speed", "value"),
+    State("gen-number-of-larks", "value"),
     prevent_initial_call=True,
 )
 def generate_birds_json(
@@ -1508,6 +1509,7 @@ def generate_birds_json(
     variance_speed_value,
     variance_z_value,
     variance_vertical_speed_value,
+    number_of_larks_value,
 ):
     try:
         parameters = parse_generation_parameters(
@@ -1529,6 +1531,7 @@ def generate_birds_json(
             variance_speed_value=variance_speed_value,
             variance_z_value=variance_z_value,
             variance_vertical_speed_value=variance_vertical_speed_value,
+            number_of_larks_value=number_of_larks_value,
         )
 
         records = generate_birds(**parameters)

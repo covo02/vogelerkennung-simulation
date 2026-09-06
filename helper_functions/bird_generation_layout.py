@@ -46,6 +46,14 @@ def bird_generator_tab():
                                 maximum=500,
                             ),
                             input_field(
+                                "Anzahl Feldlerchen",
+                                "gen-number-of-larks",
+                                1,
+                                step=1,
+                                minimum=0,
+                                maximum=500,
+                            ),
+                            input_field(
                                 "Messabstand [Sekunden]",
                                 "gen-time-interval",
                                 5,

@@ -58,7 +58,11 @@ server = app.server
 # HILFSFUNKTIONEN
 # ============================================================================
 
-def load_dataframe_from_json(json_path: Path, required_columns: set[str] | None = None) -> pd.DataFrame | None:
+def load_dataframe_from_json(
+    json_path: Path,
+    required_columns: set[str] | None = None,
+    group_column: str = "bird_id",
+) -> pd.DataFrame | None:
     if not json_path.is_file():
         return None
 
@@ -74,24 +78,43 @@ def load_dataframe_from_json(json_path: Path, required_columns: set[str] | None 
 
     df = pd.DataFrame(data)
 
-    required = required_columns or {"bird_id", "timestamp", "enu_e", "enu_n", "enu_u"}
+    required = required_columns or {
+        group_column,
+        "timestamp",
+        "enu_e",
+        "enu_n",
+        "enu_u",
+    }
+
     missing_columns = required - set(df.columns)
     if missing_columns:
         return None
 
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+
     for coordinate in ("enu_e", "enu_n", "enu_u"):
         df[coordinate] = pd.to_numeric(df[coordinate], errors="coerce")
 
-    df = df.dropna(subset=["bird_id", "timestamp", "enu_e", "enu_n", "enu_u"])
-    if "bird_id" in df.columns:
-        df = df.sort_values(["bird_id", "timestamp"])
+    df = df.dropna(
+        subset=[
+            group_column,
+            "timestamp",
+            "enu_e",
+            "enu_n",
+            "enu_u",
+        ]
+    )
+
+    df = df.sort_values([group_column, "timestamp"])
 
     return df if not df.empty else None
 
 
 def load_trajectory_dataframe() -> pd.DataFrame | None:
-    return load_dataframe_from_json(TRAJECTORY_JSON)
+    return load_dataframe_from_json(
+        TRAJECTORY_JSON,
+        group_column="determined_bird_id",
+    )
 
 
 def load_birds_dataframe() -> pd.DataFrame | None:
@@ -515,6 +538,8 @@ def build_figure(
     show_projection: bool = False,
     show_detected_vectors_only: bool = False,
     detected_vectors_payload: dict | None = None,
+    group_column: str = "bird_id",
+    trajectory_lines: bool = False,
 ) -> go.Figure:
     fig = go.Figure()
 
@@ -522,14 +547,15 @@ def build_figure(
         add_detected_vectors_to_figure(fig, detected_vectors_payload)
     elif trajectory_df is not None:
         if group_by_bird:
-            for bird_id, group in trajectory_df.groupby("bird_id", sort=False):
+            for bird_id, group in trajectory_df.groupby(group_column, sort=False):
                 fig.add_trace(
                     go.Scatter3d(
                         x=group["enu_e"],
                         y=group["enu_n"],
                         z=group["enu_u"],
-                        mode="lines+markers",
-                        marker=dict(symbol="circle", size=2),
+                        mode="lines+markers" if trajectory_lines else "markers",
+                        marker=dict(symbol="circle", size=3),
+                        line=dict(width=3) if trajectory_lines else None,
                         name=str(bird_id),
                         text=group["timestamp"].astype(str),
                         hovertemplate=(
@@ -902,6 +928,16 @@ app.layout = html.Div(
                                         html.Div(className="divider"),
 
                                         html.Div(
+                                            id="overview-action-output",
+                                            children="Status: bereit",
+                                            className="mono",
+                                            style={
+                                                "marginBottom": "12px",
+                                                "color": "var(--muted)",
+                                            },
+                                        ),
+
+                                        html.Div(
                                             id="bird-position-summary",
                                             children=[
                                                 html.Div(
@@ -1008,6 +1044,30 @@ app.layout = html.Div(
                                                 "color": "var(--muted)",
                                             },
                                         ),
+                                        html.Div(className="divider"),
+
+                                        html.Div(
+                                            className="cardTitle",
+                                            children=[html.H2("Berechnete Trajektorien")],
+                                        ),
+
+                                        dcc.Loading(
+                                            type="default",
+                                            children=dcc.Graph(
+                                                id="trajectory-graph",
+                                                figure=build_figure(
+                                                    load_trajectory_dataframe(),
+                                                    default_pi_setup(),
+                                                    "Klicke auf „Trajektorie berechnen“, um die Trajektorien zu laden.",
+                                                    aspect_mode="data",
+                                                    group_by_bird=True,
+                                                    group_column="determined_bird_id",
+                                                    trajectory_lines=True,
+                                                ),
+                                                config={"responsive": True},
+                                                style={"height": "1000px"},
+                                            ),
+                                        ),
                                     ],
                                 ),
                             ],
@@ -1109,96 +1169,39 @@ def update_camera_2d_tab(tab_value, _filter_clicks, slider_value):
 
     return build_camera_2d_children(slider_value)
 
-
 @app.callback(
     Output("main-graph", "figure"),
-    Output("action-output", "children"),
+    Output("overview-action-output", "children"),
     Output("bird-position-summary", "children"),
-    Input("btn-run-trajectory", "n_clicks"),
     Input("btn-load-birds-json", "n_clicks"),
     Input("btn-filter-pyramid-points", "n_clicks"),
     Input("btn-determine-position", "n_clicks"),
     Input("pi-setup-table", "data"),
     Input("aspect-mode-toggle", "value"),
 )
-def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, determine_position_clicks, pi_setup_rows, aspect_mode):
+def update_overview(
+    load_birds_clicks,
+    filter_clicks,
+    determine_position_clicks,
+    pi_setup_rows,
+    aspect_mode,
+):
     pi_setup = normalize_pi_setup(pi_setup_rows)
-    view_length = 400.0
 
     for pi in pi_setup:
-        pi["view_length"] = view_length
+        pi["view_length"] = 400.0
 
     triggered = ctx.triggered_id
     status_message = "Status: bereit"
     summary_children = [html.Div("Keine sichtbaren Vogelpositionen.", className="mono")]
 
-    if triggered == "btn-run-trajectory" and (n_clicks or 0) > 0:
-        if not TRAJECTORY_SCRIPT.is_file():
-            trajectory_df = load_trajectory_dataframe()
-            return (
-                build_figure(
-                    trajectory_df,
-                    pi_setup,
-                    "trajectory.py wurde nicht gefunden.",
-                    aspect_mode=aspect_mode or "data",
-                ),
-                f"Status: Datei nicht gefunden: {TRAJECTORY_SCRIPT}",
-                summary_children,
-            )
-
-        try:
-            subprocess.run(
-                [sys.executable, str(TRAJECTORY_SCRIPT)],
-                cwd=str(BASE_DIR),
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=SCRIPT_TIMEOUT_SECONDS,
-            )
-            status_message = "Status: trajectory.py wurde erfolgreich ausgeführt. 3D-Plot geladen."
-        except subprocess.TimeoutExpired:
-            trajectory_df = load_trajectory_dataframe()
-            return (
-                build_figure(
-                    trajectory_df,
-                    pi_setup,
-                    "Die Berechnung hat das Zeitlimit überschritten.",
-                    aspect_mode=aspect_mode or "data",
-                ),
-                f"Status: Abbruch nach {SCRIPT_TIMEOUT_SECONDS} Sekunden.",
-                summary_children,
-            )
-        except subprocess.CalledProcessError as error:
-            details = short_error_message(error.stderr or error.stdout)
-            trajectory_df = load_trajectory_dataframe()
-            return (
-                build_figure(
-                    trajectory_df,
-                    pi_setup,
-                    "Fehler beim Ausführen von trajectory.py.",
-                    aspect_mode=aspect_mode or "data",
-                ),
-                f"Status: trajectory.py ist fehlgeschlagen: {details}",
-                summary_children,
-            )
-        except Exception as error:
-            trajectory_df = load_trajectory_dataframe()
-            return (
-                build_figure(
-                    trajectory_df,
-                    pi_setup,
-                    "Die Trajektoriendaten konnten nicht geladen werden.",
-                    aspect_mode=aspect_mode or "data",
-                ),
-                f"Status: Fehler beim Laden der Daten: {short_error_message(error)}",
-                summary_children,
-            )
-    elif triggered == "btn-load-birds-json" and (load_birds_clicks or 0) > 0:
+    if triggered == "btn-load-birds-json" and (load_birds_clicks or 0) > 0:
         birds_df = load_birds_dataframe()
+
         if birds_df is None:
             return (
                 build_figure(
-                    load_trajectory_dataframe(),
+                    None,
                     pi_setup,
                     "Keine Vogel-JSON-Datei gefunden.",
                     aspect_mode=aspect_mode or "data",
@@ -1208,7 +1211,11 @@ def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, determine_positio
                 summary_children,
             )
 
-        status_message = "Status: vogel_flugbahnen.json geladen. Bitte anschließend 'Punkte in Pyramiden filtern' klicken."
+        status_message = (
+            "Status: vogel_flugbahnen.json geladen. "
+            "Bitte anschließend „Punkte in Pyramiden filtern“ klicken."
+        )
+
         return (
             build_figure(
                 birds_df,
@@ -1221,9 +1228,11 @@ def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, determine_positio
             status_message,
             summarize_visible_birds(birds_df.to_dict(orient="records")),
         )
-    elif triggered == "btn-filter-pyramid-points" and (filter_clicks or 0) > 0:
+
+    if triggered == "btn-filter-pyramid-points" and (filter_clicks or 0) > 0:
         payload = load_json_payload(BIRDS_JSON)
         source_file = BIRDS_JSON.name
+
         if payload is None:
             payload = load_trajectory_payload()
             source_file = TRAJECTORY_JSON.name
@@ -1231,10 +1240,9 @@ def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, determine_positio
         records = extract_trajectory_records(payload)
 
         if not records:
-            trajectory_df = load_trajectory_dataframe()
             return (
                 build_figure(
-                    trajectory_df,
+                    None,
                     pi_setup,
                     "Keine Trajektoriendaten zum Filtern gefunden.",
                     aspect_mode=aspect_mode or "data",
@@ -1249,12 +1257,17 @@ def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, determine_positio
             records,
             CAMERA_PLANE_SIDE_LENGTH,
         )
+
         matching_point_ids = {
             id(point)
             for pi_points in points_by_pi.values()
             for point in pi_points
         }
-        filtered_records = [record for record in records if id(record) in matching_point_ids]
+
+        filtered_records = [
+            record for record in records
+            if id(record) in matching_point_ids
+        ]
 
         if BIRDS_JSON.is_file():
             save_birds_payload(payload, filtered_records)
@@ -1269,12 +1282,14 @@ def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, determine_positio
         )
 
         filtered_df = pd.DataFrame(filtered_records)
-
         deleted_points = len(records) - len(filtered_records)
+
         status_message = (
             f"Status: {len(filtered_records)} Punkte innerhalb der Pyramiden behalten, "
-            f"{deleted_points} Punkte entfernt. Projektionen in {BIRD_IMAGES_JSON.name} gespeichert."
+            f"{deleted_points} Punkte entfernt. "
+            f"Projektionen in {BIRD_IMAGES_JSON.name} gespeichert."
         )
+
         return (
             build_figure(
                 filtered_df,
@@ -1287,10 +1302,13 @@ def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, determine_positio
             status_message,
             summarize_visible_birds(filtered_records),
         )
-    elif triggered == "btn-determine-position" and (determine_position_clicks or 0) > 0:
+
+    if triggered == "btn-determine-position" and (determine_position_clicks or 0) > 0:
         detected_payload = build_detected_positions_payload(BIRD_IMAGES_JSON)
+
         if not isinstance(detected_payload, dict):
             message = f"Status: Keine gültigen Daten in {BIRD_IMAGES_JSON.name} gefunden."
+
             return (
                 build_figure(
                     None,
@@ -1299,99 +1317,146 @@ def run_trajectory(n_clicks, load_birds_clicks, filter_clicks, determine_positio
                     aspect_mode=aspect_mode or "data",
                     show_detected_vectors_only=True,
                     detected_vectors_payload=None,
-                ),
-                message,
-                [html.Div("Keine erkannten Vektorpositionen verfügbar.", className="mono")],
-            )
-
-        vectors = detected_payload.get("detected_vectors")
-        vector_count = len(vectors) if isinstance(vectors, list) else 0
-        if vector_count == 0:
-            message = (
-                f"Status: In {BIRD_IMAGES_JSON.name} wurden keine projizierten Punkte gefunden."
-            )
-            return (
-                build_figure(
-                    None,
-                    pi_setup,
-                    message,
-                    aspect_mode=aspect_mode or "data",
-                    show_detected_vectors_only=True,
-                    detected_vectors_payload=detected_payload,
                 ),
                 message,
                 [html.Div("Keine erkannten Vektorpositionen verfügbar.", className="mono")],
             )
 
         save_detected_positions_payload(DETECTED_POSITIONS_JSON, detected_payload)
-        saved_payload = load_detected_positions_payload(DETECTED_POSITIONS_JSON)
-        if not isinstance(saved_payload, dict):
-            message = f"Status: Fehler beim Speichern von {DETECTED_POSITIONS_JSON.name}."
-            return (
-                build_figure(
-                    None,
-                    pi_setup,
-                    message,
-                    aspect_mode=aspect_mode or "data",
-                    show_detected_vectors_only=True,
-                    detected_vectors_payload=None,
-                ),
-                message,
-                [html.Div("Keine erkannten Vektorpositionen verfügbar.", className="mono")],
-            )
 
-        saved_vectors = saved_payload.get("detected_vectors") if isinstance(saved_payload, dict) else None
-        saved_vector_count = len(saved_vectors) if isinstance(saved_vectors, list) else 0
-        pi_count = len(
-            {
-                str(vector.get("pi_id", "pi"))
-                for vector in (saved_vectors or [])
-                if isinstance(vector, dict)
-            }
-        )
-        status_message = (
-            f"Status: {saved_vector_count} Vektoren aus {BIRD_IMAGES_JSON.name} erstellt und in "
+        vectors = detected_payload.get("detected_vectors", [])
+        vector_count = len(vectors) if isinstance(vectors, list) else 0
+
+        message = (
+            f"Status: {vector_count} erkannte Vektoren wurden in "
             f"{DETECTED_POSITIONS_JSON.name} gespeichert."
         )
-        overlap_entries = saved_payload.get("overlaps") if isinstance(saved_payload, dict) else None
-        overlap_count = len(overlap_entries) if isinstance(overlap_entries, list) else 0
-        summary = [
-            html.Div(
-                (
-                    f"Erkannte Positionen: {saved_vector_count} Vektoren von {pi_count} Pi(s). "
-                    f"Ueberlappungen pro Zeitstempel: {overlap_count}."
-                ),
-                className="mono",
-            )
-        ]
+
         return (
             build_figure(
                 None,
                 pi_setup,
-                status_message,
+                message,
                 aspect_mode=aspect_mode or "data",
                 show_detected_vectors_only=True,
-                detected_vectors_payload=saved_payload,
+                detected_vectors_payload=detected_payload,
             ),
-            status_message,
-            summary,
+            message,
+            [html.Div(f"Erkannte Positionen: {vector_count} Vektoren.", className="mono")],
         )
-    elif triggered == "pi-setup-table":
-        status_message = "Status: Pi-Setup aktualisiert."
 
     trajectory_df = load_trajectory_dataframe()
-    if trajectory_df is not None:
-        summary_children = summarize_visible_birds(trajectory_df.to_dict(orient="records"))
+
     return (
         build_figure(
             trajectory_df,
             pi_setup,
             status_message,
             aspect_mode=aspect_mode or "data",
+            group_by_bird=False,
         ),
         status_message,
-        summary_children,
+        summarize_visible_birds(
+            trajectory_df.to_dict(orient="records")
+        ) if trajectory_df is not None else summary_children,
     )
+
+@app.callback(
+    Output("trajectory-graph", "figure"),
+    Output("action-output", "children"),
+    Input("btn-run-trajectory", "n_clicks"),
+    State("pi-setup-table", "data"),
+    State("aspect-mode-toggle", "value"),
+    prevent_initial_call=True,
+)
+def run_trajectory_plot(n_clicks, pi_setup_rows, aspect_mode):
+    pi_setup = normalize_pi_setup(pi_setup_rows)
+
+    for pi in pi_setup:
+        pi["view_length"] = 400.0
+
+    figure_options = {
+        "aspect_mode": aspect_mode or "data",
+        "group_by_bird": True,
+        "group_column": "determined_bird_id",
+        "trajectory_lines": True,
+    }
+
+    if not TRAJECTORY_SCRIPT.is_file():
+        message = f"Status: Datei nicht gefunden: {TRAJECTORY_SCRIPT}"
+
+        return (
+            build_figure(
+                load_trajectory_dataframe(),
+                pi_setup,
+                "trajectory.py wurde nicht gefunden.",
+                **figure_options,
+            ),
+            message,
+        )
+
+    try:
+        subprocess.run(
+            [sys.executable, str(TRAJECTORY_SCRIPT)],
+            cwd=str(BASE_DIR),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=SCRIPT_TIMEOUT_SECONDS,
+        )
+
+        trajectory_df = load_trajectory_dataframe()
+        message = "Status: trajectory.py wurde erfolgreich ausgeführt."
+
+        return (
+            build_figure(
+                trajectory_df,
+                pi_setup,
+                message,
+                **figure_options,
+            ),
+            message,
+        )
+
+    except subprocess.TimeoutExpired:
+        message = f"Status: Abbruch nach {SCRIPT_TIMEOUT_SECONDS} Sekunden."
+
+        return (
+            build_figure(
+                load_trajectory_dataframe(),
+                pi_setup,
+                "Die Berechnung hat das Zeitlimit überschritten.",
+                **figure_options,
+            ),
+            message,
+        )
+
+    except subprocess.CalledProcessError as error:
+        details = short_error_message(error.stderr or error.stdout)
+        message = f"Status: trajectory.py ist fehlgeschlagen: {details}"
+
+        return (
+            build_figure(
+                load_trajectory_dataframe(),
+                pi_setup,
+                "Fehler beim Ausführen von trajectory.py.",
+                **figure_options,
+            ),
+            message,
+        )
+
+    except Exception as error:
+        message = f"Status: Fehler beim Laden der Daten: {short_error_message(error)}"
+
+        return (
+            build_figure(
+                load_trajectory_dataframe(),
+                pi_setup,
+                "Die Trajektoriendaten konnten nicht geladen werden.",
+                **figure_options,
+            ),
+            message,
+        )
 
 # ============================================================================
 # CALLBACKS: VOGELGENERIERUNG

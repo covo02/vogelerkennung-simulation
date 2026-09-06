@@ -79,7 +79,7 @@ def generate_birds(
 
             record = {
                 "bird_id": bird_id,
-                "determined_bird_id": "bird_0000",
+                # "determined_bird_id": "bird_0000",
                 "timestamp": (
                     start_time
                     + timedelta(seconds=sample_index * time_interval)

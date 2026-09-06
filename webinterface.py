@@ -113,7 +113,7 @@ def load_dataframe_from_json(
 def load_trajectory_dataframe() -> pd.DataFrame | None:
     return load_dataframe_from_json(
         TRAJECTORY_JSON,
-        group_column="determined_bird_id",
+        group_column="determined_track_id",
     )
 
 
@@ -436,7 +436,7 @@ def collect_visible_bird_positions(records: list[dict]) -> dict[str, list[tuple[
     grouped_positions: dict[str, list[tuple[float, float, float]]] = {}
 
     for record in records:
-        bird_id = str(record.get("bird_id") or record.get("determined_bird_id") or "unbekannt")
+        bird_id = str(record.get("bird_id") or record.get("determined_track_id") or "unbekannt")
         x = to_float(record.get("enu_e"), 0.0)
         y = to_float(record.get("enu_n"), 0.0)
         z = to_float(record.get("enu_u"), 0.0)
@@ -483,7 +483,7 @@ def add_pi_to_bird_vectors(fig: go.Figure, pi_setup: list[dict], records: list[d
             if not point_in_pi_view_volume(pi, record, plane_side_length):
                 continue
 
-            bird_id = str(record.get("bird_id") or record.get("determined_bird_id") or "unbekannt")
+            bird_id = str(record.get("bird_id") or record.get("determined_track_id") or "unbekannt")
             projected_point = project_point_to_pi_plane(pi, record, plane_side_length)
             if projected_point is None:
                 continue
@@ -1061,7 +1061,7 @@ app.layout = html.Div(
                                                     "Klicke auf „Trajektorie berechnen“, um die Trajektorien zu laden.",
                                                     aspect_mode="data",
                                                     group_by_bird=True,
-                                                    group_column="determined_bird_id",
+                                                    group_column="determined_track_id",
                                                     trajectory_lines=True,
                                                 ),
                                                 config={"responsive": True},
@@ -1378,7 +1378,7 @@ def run_trajectory_plot(n_clicks, pi_setup_rows, aspect_mode):
     figure_options = {
         "aspect_mode": aspect_mode or "data",
         "group_by_bird": True,
-        "group_column": "determined_bird_id",
+        "group_column": "determined_track_id",
         "trajectory_lines": True,
     }
 

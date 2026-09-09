@@ -29,6 +29,10 @@ from helper_functions.detected_positions import (
     save_detected_positions_payload,
 )
 from helper_functions.generate_plots import create_bird_stats, create_birds_2d_figure, create_birds_3d_figure, status_figure
+# HINWEIS: Falls die Datei lokal in "skylark_classifier.py" umbenannt wurde,
+# diese Zeile entsprechend anpassen:
+# from helper_functions.skylark_classifier import classify_tracks, evaluate_against_ground_truth
+from helper_functions.skylark_classifier import classify_tracks, evaluate_against_ground_truth
 
 
 # ============================================================================
@@ -540,7 +544,16 @@ def build_figure(
     detected_vectors_payload: dict | None = None,
     group_column: str = "bird_id",
     trajectory_lines: bool = False,
+    track_visibility: dict[str, bool] | None = None,
 ) -> go.Figure:
+    """
+    track_visibility: optionales Mapping track_id -> bool. True bedeutet
+    die Trajektorie ist beim Laden sichtbar, False bedeutet sie ist in der
+    Legende vorhanden, aber ausgeblendet ("legendonly") -- der Nutzer kann
+    sie jederzeit per Klick auf den Legendeneintrag manuell wieder
+    einblenden, unabhaengig vom Bulk-Filter. Fehlt ein Track im Mapping
+    oder ist track_visibility None, gilt er als sichtbar.
+    """
     fig = go.Figure()
 
     if show_detected_vectors_only:
@@ -548,6 +561,11 @@ def build_figure(
     elif trajectory_df is not None:
         if group_by_bird:
             for bird_id, group in trajectory_df.groupby(group_column, sort=False):
+                is_visible = True
+                if track_visibility is not None:
+                    is_visible = track_visibility.get(str(bird_id), True)
+                trace_visible = True if is_visible else "legendonly"
+
                 fig.add_trace(
                     go.Scatter3d(
                         x=group["enu_e"],
@@ -557,6 +575,7 @@ def build_figure(
                         marker=dict(symbol="circle", size=3),
                         line=dict(width=3) if trajectory_lines else None,
                         name=str(bird_id),
+                        visible=trace_visible,
                         text=group["timestamp"].astype(str),
                         hovertemplate=(
                             "<b>%{fullData.name}</b><br>"
@@ -586,6 +605,7 @@ def build_figure(
                             sizeref=20,
                             anchor="tail",
                             showscale=False,
+                            visible=trace_visible,
                             name=f"{bird_id} Richtung",
                         )
                     )
@@ -756,6 +776,8 @@ def short_error_message(error) -> str:
 app.layout = html.Div(
     className="container",
     children=[
+        dcc.Store(id="lark-classification-store", data=None),
+
         html.Div(
             className="header",
             children=[
@@ -1051,6 +1073,41 @@ app.layout = html.Div(
                                             children=[html.H2("Berechnete Trajektorien")],
                                         ),
 
+                                        html.Div(
+                                            className="row",
+                                            children=[
+                                                html.Span("Sichtbarkeit der Tracks", className="label"),
+                                                dcc.RadioItems(
+                                                    id="track-visibility-filter",
+                                                    options=[
+                                                        {"label": "Alle Tracks anzeigen", "value": "all"},
+                                                        {"label": "Nur Feldlerchen anzeigen", "value": "only_larks"},
+                                                        {"label": "Alle Tracks ausblenden", "value": "none"},
+                                                    ],
+                                                    value="all",
+                                                    inline=True,
+                                                    labelStyle={
+                                                        "marginRight": "16px",
+                                                        "color": "var(--text)",
+                                                        "fontWeight": "700",
+                                                    },
+                                                    inputStyle={"marginRight": "6px"},
+                                                ),
+                                            ],
+                                        ),
+                                        html.Div(
+                                            (
+                                                "Hinweis: Alle Tracks bleiben immer in der Legende sichtbar. "
+                                                "Diese Auswahl setzt nur die Anfangssichtbarkeit — jeder Track "
+                                                "kann jederzeit durch Anklicken seines Legendeneintrags einzeln "
+                                                "ein- oder ausgeblendet werden, unabhängig von dieser Auswahl. "
+                                                "„Nur Feldlerchen anzeigen“ setzt zusätzlich voraus, dass zuvor "
+                                                "„Feldlerchen klassifizieren“ ausgeführt wurde."
+                                            ),
+                                            className="sub",
+                                            style={"marginTop": "6px", "marginBottom": "10px"},
+                                        ),
+
                                         dcc.Loading(
                                             type="default",
                                             children=dcc.Graph(
@@ -1067,6 +1124,66 @@ app.layout = html.Div(
                                                 config={"responsive": True},
                                                 style={"height": "1000px"},
                                             ),
+                                        ),
+
+                                        html.Div(className="divider"),
+
+                                        html.Div(
+                                            className="cardTitle",
+                                            children=[html.H2("Feldlerchen-Klassifikation")],
+                                        ),
+
+                                        html.Div(
+                                            className="row",
+                                            children=[
+                                                html.Button(
+                                                    "Feldlerchen klassifizieren",
+                                                    id="btn-classify-larks",
+                                                    n_clicks=0,
+                                                    className="btn",
+                                                ),
+                                            ],
+                                        ),
+
+                                        html.Div(
+                                            "Status: bereit",
+                                            id="classification-status",
+                                            className="mono",
+                                            style={
+                                                "marginTop": "10px",
+                                                "color": "var(--muted)",
+                                            },
+                                        ),
+
+                                        dash_table.DataTable(
+                                            id="lark-classification-table",
+                                            columns=[
+                                                {"name": "Track", "id": "track_id"},
+                                                {"name": "Feldlerche?", "id": "is_feldlerche"},
+                                                {"name": "Score", "id": "score"},
+                                                {"name": "Pfad", "id": "classification_path"},
+                                            ],
+                                            data=[],
+                                            page_size=15,
+                                            sort_action="native",
+                                            style_table={"overflowX": "auto"},
+                                            style_cell={
+                                                "backgroundColor": "rgba(255,255,255,0.02)",
+                                                "color": "var(--text)",
+                                                "border": "1px solid var(--border)",
+                                                "padding": "8px",
+                                                "fontFamily": "inherit",
+                                                "fontSize": "13px",
+                                            },
+                                            style_header={
+                                                "backgroundColor": "rgba(255,255,255,0.05)",
+                                                "fontWeight": "700",
+                                                "color": "var(--text)",
+                                                "border": "1px solid var(--border)",
+                                            },
+                                            style_data_conditional=[
+                                                {"if": {"row_index": "odd"}, "backgroundColor": "rgba(255,255,255,0.015)"},
+                                            ],
                                         ),
                                     ],
                                 ),
@@ -1112,7 +1229,7 @@ app.layout = html.Div(
                                 ),
                             ],
                         ),
-                        
+
                     ],
                 ),
             ],
@@ -1148,7 +1265,6 @@ def render_tab(tab):
         return hidden, hidden, hidden, visible, hidden
 
     return hidden, hidden, hidden, hidden, visible
-
 
 @app.callback(
     Output("camera-2d-container", "children"),
@@ -1457,6 +1573,158 @@ def run_trajectory_plot(n_clicks, pi_setup_rows, aspect_mode):
             ),
             message,
         )
+
+
+@app.callback(
+    Output("lark-classification-table", "data"),
+    Output("classification-status", "children"),
+    Output("lark-classification-store", "data"),
+    Input("btn-classify-larks", "n_clicks"),
+    prevent_initial_call=True,
+)
+def classify_larks(_n_clicks):
+    """
+    Klassifiziert alle Trajektorien aus vogel_flugbahnen_determined.json
+    danach, ob sie dem Feldlerchen-Flugmuster (Steigflug -> Singflug ->
+    Sturzflug) entsprechen. Nutzt skylark_classifier.py. Das Ergebnis
+    wird zusaetzlich in lark-classification-store abgelegt, damit der
+    Sichtbarkeitsfilter im Trajektorien-Graph darauf zugreifen kann.
+    """
+    records = extract_trajectory_records(load_trajectory_payload())
+
+    if not records:
+        return [], "Status: Keine Trajektoriendaten gefunden. Bitte zuerst „Trajektorie berechnen“ ausführen.", None
+
+    results = classify_tracks(records, group_column="determined_track_id")
+
+    table_data = [
+        {
+            "track_id": result.track_id,
+            "is_feldlerche": "Ja" if result.is_feldlerche else "Nein",
+            "score": result.score,
+            "classification_path": result.classification_path,
+        }
+        for result in results
+    ]
+
+    evaluation = evaluate_against_ground_truth(records, results)
+
+    status = f"Status: {len(results)} Tracks klassifiziert."
+    if evaluation:
+        status += (
+            f" (Recall={evaluation['recall']}, "
+            f"Precision={evaluation['precision']}, "
+            f"Accuracy={evaluation['accuracy']})"
+        )
+
+    return table_data, status, table_data
+
+
+@app.callback(
+    Output("trajectory-graph", "figure", allow_duplicate=True),
+    Input("track-visibility-filter", "value"),
+    Input("lark-classification-store", "data"),
+    State("pi-setup-table", "data"),
+    State("aspect-mode-toggle", "value"),
+    prevent_initial_call=True,
+)
+def update_trajectory_visibility(visibility_filter, classification_data, pi_setup_rows, aspect_mode):
+    """
+    Setzt die Anfangssichtbarkeit aller Tracks im 3D-Graph basierend auf
+    dem gewaehlten Modus:
+    - "all": alle Tracks sichtbar (Standard)
+    - "only_larks": nur als Feldlerche klassifizierte Tracks sichtbar,
+      alle anderen als "legendonly" (in der Legende vorhanden, aber
+      ausgeblendet)
+    - "none": alle Tracks als "legendonly"
+
+    WICHTIG: Es werden immer ALLE Tracks geplottet und bleiben in der
+    Legende vorhanden - unabhaengig vom gewaehlten Modus. Der Bulk-Filter
+    setzt nur die initiale Sichtbarkeit; jeder Track kann jederzeit per
+    Klick auf seinen Legendeneintrag individuell ein- oder ausgeblendet
+    werden, unabhaengig von dieser Auswahl.
+    """
+    pi_setup = normalize_pi_setup(pi_setup_rows)
+
+    for pi in pi_setup:
+        pi["view_length"] = 400.0
+
+    figure_options = {
+        "aspect_mode": aspect_mode or "data",
+        "group_by_bird": True,
+        "group_column": "determined_track_id",
+        "trajectory_lines": True,
+    }
+
+    trajectory_df = load_trajectory_dataframe()
+
+    if trajectory_df is None:
+        return build_figure(
+            None,
+            pi_setup,
+            "Keine Trajektoriendaten vorhanden. Bitte zuerst „Trajektorie berechnen“ ausführen.",
+            **figure_options,
+        )
+
+    all_track_ids = {str(track_id) for track_id in trajectory_df["determined_track_id"].unique()}
+
+    if visibility_filter == "none":
+        track_visibility = {track_id: False for track_id in all_track_ids}
+        return build_figure(
+            trajectory_df,
+            pi_setup,
+            "Status: Alle Tracks anfangs ausgeblendet (ueber Legende einzeln wieder einblendbar).",
+            track_visibility=track_visibility,
+            **figure_options,
+        )
+
+    if visibility_filter == "only_larks":
+        if not classification_data:
+            track_visibility = {track_id: False for track_id in all_track_ids}
+            return build_figure(
+                trajectory_df,
+                pi_setup,
+                "Status: Bitte zuerst „Feldlerchen klassifizieren“ ausführen.",
+                track_visibility=track_visibility,
+                **figure_options,
+            )
+
+        lark_track_ids = {
+            str(item.get("track_id"))
+            for item in classification_data
+            if item.get("is_feldlerche") == "Ja"
+        }
+
+        track_visibility = {
+            track_id: (track_id in lark_track_ids)
+            for track_id in all_track_ids
+        }
+
+        message = (
+            f"Status: {len(lark_track_ids)} Feldlerchen-Track(s) anfangs sichtbar, "
+            "restliche Tracks ueber Legende einzeln einblendbar."
+            if lark_track_ids
+            else "Status: Keine Tracks als Feldlerche klassifiziert."
+        )
+
+        return build_figure(
+            trajectory_df,
+            pi_setup,
+            message,
+            track_visibility=track_visibility,
+            **figure_options,
+        )
+
+    # visibility_filter == "all" (Standard)
+    track_visibility = {track_id: True for track_id in all_track_ids}
+    return build_figure(
+        trajectory_df,
+        pi_setup,
+        None,
+        track_visibility=track_visibility,
+        **figure_options,
+    )
+
 
 # ============================================================================
 # CALLBACKS: VOGELGENERIERUNG

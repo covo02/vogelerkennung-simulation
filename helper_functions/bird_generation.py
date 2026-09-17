@@ -2,6 +2,7 @@ import hashlib
 import random
 from datetime import datetime, timedelta
 import math
+from helper_functions.skylark_generation import generate_skylarks
 
 def generate_birds(
     number_of_birds,
@@ -22,6 +23,7 @@ def generate_birds(
     variance_speed,
     variance_z,
     variance_vertical_speed,
+    number_of_larks=0,
 ):
     """
     Generiert simulierte Vogel-Flugbahnen.
@@ -101,6 +103,22 @@ def generate_birds(
 
             records.append(record)
 
+    records.extend(
+        generate_skylarks(
+            number_of_larks=number_of_larks,
+            time_interval=time_interval,
+            sim_date=sim_date,
+            x_min=x_min,
+            x_max=x_max,
+            y_min=y_min,
+            y_max=y_max,
+            z_min=z_min,
+            z_max=z_max,
+            position_noise=position_noise,
+            seed_value=seed_value,
+        )
+    )
+
     return records
 
 # ============================================================================
@@ -173,11 +191,16 @@ def parse_generation_parameters(
     variance_speed_value,
     variance_z_value,
     variance_vertical_speed_value,
+    number_of_larks_value=0,
 ):
     """Liest und validiert alle Eingabewerte aus dem Formular."""
     number_of_birds = as_integer(
         number_of_birds_value,
         "Anzahl Vögel",
+    )
+    number_of_larks = as_integer(
+        number_of_larks_value,
+        "Anzahl Feldlerchen",
     )
     time_interval = as_integer(
         time_interval_value,
@@ -293,6 +316,11 @@ def parse_generation_parameters(
             "Die Steiggeschwindigkeit muss zwischen 0 und 0.1 liegen."
         )
 
+    if not 0 <= number_of_larks <= 500:
+        raise ValueError(
+            "Die Anzahl der Feldlerchen muss zwischen 0 und 500 liegen."
+        )
+
     return {
         "number_of_birds": number_of_birds,
         "time_interval": time_interval,
@@ -312,4 +340,5 @@ def parse_generation_parameters(
         "variance_speed": variance_speed,
         "variance_z": variance_z,
         "variance_vertical_speed": variance_vertical_speed,
+        "number_of_larks": number_of_larks,
     }

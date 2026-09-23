@@ -25,7 +25,7 @@ skylark_generation.py oder bird_generation.py.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -71,6 +71,8 @@ class FlightFeatures:
     horizontal_path_length: float
     net_horizontal_displacement: float
     max_radius_from_centroid: float
+    centroid_e: float = 0.0
+    centroid_n: float = 0.0
 
 
 def extract_features(records: List[Dict[str, Any]], track_id: str = "") -> Optional[FlightFeatures]:
@@ -145,6 +147,8 @@ def extract_features(records: List[Dict[str, Any]], track_id: str = "") -> Optio
         horizontal_path_length=horizontal_path_length,
         net_horizontal_displacement=net_horizontal_displacement,
         max_radius_from_centroid=max_radius_from_centroid,
+        centroid_e=centroid_x,
+        centroid_n=centroid_y,
     )
 
 
@@ -160,6 +164,10 @@ class ClassificationResult:
     reasons: List[str]
     classification_path: str  # "vollstaendig" | "isolierter_singflug" | "unvollstaendig"
     features: FlightFeatures
+    # Strukturierte Fassung von reasons: je Kriterium Text, ob es erfuellt
+    # wurde und mit welchem Gewicht es in den Score eingeht. Der Fliesstext
+    # in reasons bleibt unveraendert erhalten.
+    criteria: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def classify_features(
@@ -172,6 +180,7 @@ def classify_features(
     Hoehenwechsel beobachtbar ist, und nutzt eine strengere Schwelle.
     """
     reasons: List[str] = []
+    criteria: List[Dict[str, Any]] = []
 
     has_climb = features.max_climb_rate >= thresholds["min_climb_rate"]
     has_descent = features.max_descent_rate >= thresholds["min_descent_rate"]
@@ -184,10 +193,12 @@ def classify_features(
     in_territory = features.max_radius_from_centroid <= thresholds["max_territory_radius"]
 
     if has_climb and has_descent and has_altitude_gain:
-        reasons.append(
+        gate_reason = (
             f"Steigrate {features.max_climb_rate:.2f} m/s und Sinkrate "
             f"{features.max_descent_rate:.2f} m/s bestaetigt (Pflichtkriterium erfuellt)"
         )
+        reasons.append(gate_reason)
+        criteria.append({"text": gate_reason, "met": True, "weight": None})
 
         score = 0.0
         weight_total = 0.0
@@ -198,8 +209,10 @@ def classify_features(
             if condition:
                 score += weight
                 reasons.append(reason_true)
+                criteria.append({"text": reason_true, "met": True, "weight": weight})
             else:
                 reasons.append(reason_false)
+                criteria.append({"text": reason_false, "met": False, "weight": weight})
 
         add_criterion(True, 0.25, f"Hoehengewinn {features.altitude_gain:.1f}m bestaetigt", "")
         add_criterion(
@@ -228,12 +241,15 @@ def classify_features(
             reasons=reasons,
             classification_path="vollstaendig",
             features=features,
+            criteria=criteria,
         )
 
-    reasons.append(
+    gate_reason = (
         "Kein vollstaendiger Steig-/Sturzflug beobachtet "
         "(vermutlich nur Plateauphase trianguliert) - pruefe isolierten Singflug"
     )
+    reasons.append(gate_reason)
+    criteria.append({"text": gate_reason, "met": False, "weight": None})
 
     has_real_orbit = (
         features.max_radius_from_centroid >= thresholds["min_orbit_radius"]
@@ -241,7 +257,9 @@ def classify_features(
     )
 
     if not has_real_orbit:
-        reasons.append("Keine kreisende Bewegung erkennbar (zu klein, vermutlich nur Rauschen)")
+        orbit_reason = "Keine kreisende Bewegung erkennbar (zu klein, vermutlich nur Rauschen)"
+        reasons.append(orbit_reason)
+        criteria.append({"text": orbit_reason, "met": False, "weight": None})
         return ClassificationResult(
             track_id=features.track_id,
             is_feldlerche=False,
@@ -249,6 +267,7 @@ def classify_features(
             reasons=reasons,
             classification_path="unvollstaendig",
             features=features,
+            criteria=criteria,
         )
 
     score = 0.0
@@ -260,8 +279,10 @@ def classify_features(
         if condition:
             score += weight
             reasons.append(reason_true)
+            criteria.append({"text": reason_true, "met": True, "weight": weight})
         else:
             reasons.append(reason_false)
+            criteria.append({"text": reason_false, "met": False, "weight": weight})
 
     add_isolated(True, 0.35, f"Kreisende Bewegung mit Radius {features.max_radius_from_centroid:.1f}m erkannt", "")
     add_isolated(
@@ -285,6 +306,7 @@ def classify_features(
         reasons=reasons,
         classification_path="isolierter_singflug",
         features=features,
+        criteria=criteria,
     )
 
 

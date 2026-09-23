@@ -203,6 +203,11 @@ def generate_skylarks(
                 {
                     "bird_id": bird_id,
                     "determined_bird_id": "bird_0000",
+                    # Ground Truth des Revier-/Nestzentrums. Wird für die
+                    # Bewertung der Revierschätzung benötigt und von der
+                    # Trajektorienberechnung unverändert durchgereicht.
+                    "nest_e": round(nest_x, 2),
+                    "nest_n": round(nest_y, 2),
                     "timestamp": (
                         start_time
                         + timedelta(

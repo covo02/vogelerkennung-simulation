@@ -31,4 +31,10 @@
 ## Colin Voigt
 - Test des Versuchaufbaus (4)
 - Implementierung der Vogelgenerierung (6, 8.6)
-- Implementierung des Greedy-Algorithmus zur bestimmung der Flugbahnen (9)
+- Implementierung des Greedy-Algorithmus zur Bestimmung der Flugbahnen (9)
+
+## Rokas Zilinskas
+- Testen des Livesystems bzw. der Hardware
+- Code Analyse und Dokumentation der Fehlern
+- Implementierung des Algorithmus zur Erkennung/Klassifizierung von Feldlerchen
+- Erstellung des Nutzerhandbuchs

@@ -39,3 +39,8 @@
 - Codeanalyse und Dokumentation der Fehler
 - Implementierung des Algorithmus zur Erkennung/Klassifizierung von Feldlerchen
 - Erstellung des Nutzerhandbuchs
+
+## Tim Reimer
+- Testen des Livesystems bzw. der Hardware
+- Implementierung und Dokumentation der 2D Bilder Erstellungs Simulation
+- Implementierung und Dokumentation der Triangulations Simulation

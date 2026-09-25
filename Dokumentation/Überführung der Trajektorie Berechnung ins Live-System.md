@@ -10,12 +10,12 @@ Die Entscheidung, **wo** die Berechnung ausgeführt wird, muss von der nachfolge
 
 Die Funktion `determine_tracks(records)` erwartet eine Liste von Beobachtungen. Jede Beobachtung muss mindestens folgende Felder enthalten:
 
-| Feld        | Datentyp | Beschreibung                                 |
-| ----------- | -------- | -------------------------------------------- |
-| `timestamp` | String   | Zeitpunkt der Beobachtung im ISO-8601-Format |
-| `enu_e`     | Zahl     | Ost-Koordinate im ENU-Koordinatensystem      |
-| `enu_n`     | Zahl     | Nord-Koordinate im ENU-Koordinatensystem     |
-| `enu_u`     | Zahl     | Höhen-Koordinate im ENU-Koordinatensystem    |
+|Feld|Datentyp|Beschreibung|
+|---|---|---|
+|`timestamp`|String|Zeitpunkt der Beobachtung im ISO-8601-Format|
+|`enu_e`|Zahl|Ost-Koordinate im ENU-Koordinatensystem|
+|`enu_n`|Zahl|Nord-Koordinate im ENU-Koordinatensystem|
+|`enu_u`|Zahl|Höhen-Koordinate im ENU-Koordinatensystem|
 
 Die verwendeten Koordinaten müssen innerhalb eines Datensatzes dieselbe Einheit verwenden. Die Parameter `MAX_SPEED_UNITS_PER_SEC` und `DISTANCE_MARGIN` müssen zu dieser Einheit passen.
 

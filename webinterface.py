@@ -1,5 +1,4 @@
 import json
-import math
 import subprocess
 import sys
 from pathlib import Path
@@ -34,18 +33,6 @@ from helper_functions.generate_plots import create_bird_stats, create_birds_2d_f
 # diese Zeile entsprechend anpassen:
 # from helper_functions.skylark_classifier import classify_tracks, evaluate_against_ground_truth
 from helper_functions.skylark_classifier import classify_tracks, evaluate_against_ground_truth
-from helper_functions.territory_estimation import (
-    AVAILABLE_METHODS,
-    DEFAULT_METHOD,
-    METHOD_LABELS,
-    estimate_territories,
-    evaluate_estimates,
-)
-from helper_functions.track_detail import (
-    build_altitude_profile_figure,
-    features_to_dict,
-    format_feature_rows,
-)
 
 
 # ============================================================================
@@ -546,140 +533,6 @@ def add_pi_to_bird_vectors(fig: go.Figure, pi_setup: list[dict], records: list[d
             )
 
 
-def add_territories_to_figure(fig: go.Figure, territories: list[dict] | None) -> None:
-    """
-    Zeichnet die geschaetzten Revierzentren in die 3D-Figur:
-
-    - Raute am geschaetzten Zentrum
-    - gestrichelter Revierkreis auf Bodenhoehe (z = 0)
-    - Kreuz am wahren Nest (nur in der Simulation vorhanden)
-    - Verbindungslinie zwischen Schaetzung und Ground Truth als Fehlermass
-
-    territories: Liste serialisierter TerritoryEstimate-Dicts aus dem Store.
-    """
-    if not territories:
-        return
-
-    center_x: list[float] = []
-    center_y: list[float] = []
-    center_z: list[float] = []
-    center_text: list[str] = []
-
-    circle_x: list[float | None] = []
-    circle_y: list[float | None] = []
-    circle_z: list[float | None] = []
-
-    nest_x: list[float] = []
-    nest_y: list[float] = []
-    nest_z: list[float] = []
-    nest_text: list[str] = []
-
-    error_x: list[float | None] = []
-    error_y: list[float | None] = []
-    error_z: list[float | None] = []
-
-    for territory in territories:
-        estimated_e = to_float(territory.get("center_e"), 0.0)
-        estimated_n = to_float(territory.get("center_n"), 0.0)
-        radius = to_float(territory.get("radius"), 0.0)
-        track_id = str(territory.get("track_id", ""))
-        method_label = str(territory.get("method_label", ""))
-
-        center_x.append(estimated_e)
-        center_y.append(estimated_n)
-        center_z.append(0.0)
-        center_text.append(
-            f"{track_id}<br>Verfahren: {method_label}<br>Radius: {radius:.1f} m"
-        )
-
-        # Revierkreis auf Bodenhoehe.
-        steps = 60
-        for step in range(steps + 1):
-            angle = 2 * math.pi * step / steps
-            circle_x.append(estimated_e + radius * math.cos(angle))
-            circle_y.append(estimated_n + radius * math.sin(angle))
-            circle_z.append(0.0)
-        circle_x.append(None)
-        circle_y.append(None)
-        circle_z.append(None)
-
-        true_e = territory.get("true_nest_e")
-        true_n = territory.get("true_nest_n")
-        if true_e is None or true_n is None:
-            continue
-
-        true_e = to_float(true_e, 0.0)
-        true_n = to_float(true_n, 0.0)
-        error_value = to_float(territory.get("error_m"), 0.0)
-
-        nest_x.append(true_e)
-        nest_y.append(true_n)
-        nest_z.append(0.0)
-        nest_text.append(f"Wahres Nest ({track_id})<br>Abweichung: {error_value:.2f} m")
-
-        error_x.extend([estimated_e, true_e, None])
-        error_y.extend([estimated_n, true_n, None])
-        error_z.extend([0.0, 0.0, None])
-
-    if circle_x:
-        fig.add_trace(
-            go.Scatter3d(
-                x=circle_x,
-                y=circle_y,
-                z=circle_z,
-                mode="lines",
-                line=dict(width=3, color="#14b8a6", dash="dash"),
-                name="Revierkreis",
-                legendgroup="revier",
-                hoverinfo="skip",
-            )
-        )
-
-    if center_x:
-        fig.add_trace(
-            go.Scatter3d(
-                x=center_x,
-                y=center_y,
-                z=center_z,
-                mode="markers",
-                marker=dict(size=7, color="#14b8a6", symbol="diamond"),
-                name="Revierzentrum (geschaetzt)",
-                legendgroup="revier",
-                text=center_text,
-                hovertemplate="%{text}<br>X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
-            )
-        )
-
-    if error_x:
-        fig.add_trace(
-            go.Scatter3d(
-                x=error_x,
-                y=error_y,
-                z=error_z,
-                mode="lines",
-                line=dict(width=4, color="#facc15"),
-                name="Abweichung zur Ground Truth",
-                legendgroup="revier",
-                hoverinfo="skip",
-            )
-        )
-
-    if nest_x:
-        fig.add_trace(
-            go.Scatter3d(
-                x=nest_x,
-                y=nest_y,
-                z=nest_z,
-                mode="markers",
-                marker=dict(size=6, color="#facc15", symbol="x"),
-                name="Wahres Nest (Ground Truth)",
-                legendgroup="revier",
-                text=nest_text,
-                hovertemplate="%{text}<br>X: %{x:.1f}<br>Y: %{y:.1f}<extra></extra>",
-            )
-        )
-
-
 def build_figure(
     trajectory_df: pd.DataFrame | None,
     pi_setup: list[dict],
@@ -692,7 +545,6 @@ def build_figure(
     group_column: str = "bird_id",
     trajectory_lines: bool = False,
     track_visibility: dict[str, bool] | None = None,
-    territories: list[dict] | None = None,
 ) -> go.Figure:
     """
     track_visibility: optionales Mapping track_id -> bool. True bedeutet
@@ -884,8 +736,6 @@ def build_figure(
                 )
             )
 
-    add_territories_to_figure(fig, territories)
-
     if message:
         fig.add_annotation(
             text=message,
@@ -920,173 +770,6 @@ def short_error_message(error) -> str:
     return message[-600:]
 
 
-def classification_rows(store_data) -> list[dict]:
-    """
-    Liest die Tabellenzeilen aus dem Klassifikations-Store.
-
-    Der Store enthält seit der Erweiterung um das Detail-Panel ein Dict mit
-    den Schlüsseln "rows" und "details". Die ältere Form (eine reine Liste)
-    wird weiterhin akzeptiert.
-    """
-    if isinstance(store_data, dict):
-        rows = store_data.get("rows")
-        return rows if isinstance(rows, list) else []
-
-    if isinstance(store_data, list):
-        return store_data
-
-    return []
-
-
-def classification_details(store_data) -> dict:
-    """Liefert die Merkmale und Begründungen je Track aus dem Store."""
-    if isinstance(store_data, dict):
-        details = store_data.get("details")
-        return details if isinstance(details, dict) else {}
-
-    return {}
-
-
-# ============================================================================
-# SEITENPANEL: REVIERSCHÄTZUNG UND TRACK-DETAIL
-# ============================================================================
-PANEL_CARD_STYLE = {
-    "border": "1px solid var(--border)",
-    "borderRadius": "14px",
-    "background": "linear-gradient(180deg, var(--panel), var(--panel2))",
-    "padding": "14px",
-}
-
-PANEL_TITLE_STYLE = {
-    "fontSize": "13px",
-    "fontWeight": "700",
-    "color": "var(--text)",
-    "marginBottom": "8px",
-}
-
-PANEL_HINT_STYLE = {
-    "fontSize": "12px",
-    "color": "var(--muted)",
-    "lineHeight": "1.5",
-}
-
-
-def build_side_panel() -> html.Div:
-    """
-    Rechte Panelspalte neben dem 3D-Plot.
-
-    Oben die Revierschätzung (Verfahrenswahl, Fehlerstatistik, eine Karte je
-    Track), darunter das Detail zum Track, dessen Zeile in der
-    Klassifikationstabelle angeklickt wurde.
-    """
-    return html.Div(
-        style={
-            "width": "340px",
-            "flex": "0 0 340px",
-            "display": "flex",
-            "flexDirection": "column",
-            "gap": "12px",
-        },
-        children=[
-            html.Div(
-                style=PANEL_CARD_STYLE,
-                children=[
-                    html.Div("Revierschätzung", style=PANEL_TITLE_STYLE),
-                    html.Div(
-                        (
-                            "Geschätzt wird das Revierzentrum aus den als Feldlerche "
-                            "klassifizierten Tracks. Der Singflug markiert das Revier, "
-                            "nicht punktgenau das Nest."
-                        ),
-                        style=PANEL_HINT_STYLE,
-                    ),
-                    html.Button(
-                        "Revierzentren schätzen",
-                        id="btn-estimate-territories",
-                        n_clicks=0,
-                        className="btn",
-                        style={"marginTop": "12px", "width": "100%"},
-                    ),
-                    html.Div(
-                        "Schätzverfahren",
-                        className="label",
-                        style={"marginTop": "14px", "marginBottom": "6px"},
-                    ),
-                    dcc.RadioItems(
-                        id="territory-method",
-                        options=[
-                            {"label": METHOD_LABELS[method], "value": method}
-                            for method in AVAILABLE_METHODS
-                        ],
-                        value=DEFAULT_METHOD,
-                        labelStyle={
-                            "display": "block",
-                            "color": "var(--text)",
-                            "fontSize": "12px",
-                            "marginBottom": "5px",
-                        },
-                        inputStyle={"marginRight": "7px"},
-                    ),
-                    html.Div(
-                        "Status: noch nicht geschätzt",
-                        id="territory-status",
-                        className="mono",
-                        style={
-                            "marginTop": "12px",
-                            "fontSize": "11px",
-                            "color": "var(--muted)",
-                            "lineHeight": "1.5",
-                        },
-                    ),
-                    html.Div(
-                        id="territory-cards",
-                        style={
-                            "marginTop": "12px",
-                            "display": "flex",
-                            "flexDirection": "column",
-                            "gap": "8px",
-                            "maxHeight": "260px",
-                            "overflowY": "auto",
-                        },
-                        children=[],
-                    ),
-                ],
-            ),
-            html.Div(
-                style=PANEL_CARD_STYLE,
-                children=[
-                    html.Div(
-                        "Track-Detail",
-                        id="track-detail-title",
-                        style=PANEL_TITLE_STYLE,
-                    ),
-                    html.Div(
-                        "Zeile in der Klassifikationstabelle anklicken.",
-                        id="track-detail-subtitle",
-                        style=PANEL_HINT_STYLE,
-                    ),
-                    dcc.Graph(
-                        id="track-detail-profile",
-                        figure=build_altitude_profile_figure(),
-                        config={"displayModeBar": False, "responsive": True},
-                        style={"height": "210px", "marginTop": "8px"},
-                    ),
-                    html.Div(
-                        id="track-detail-features",
-                        style={"marginTop": "4px"},
-                        children=[],
-                    ),
-                    html.Div(
-                        id="track-detail-reasons",
-                        style={"marginTop": "12px"},
-                        children=[],
-                    ),
-                ],
-            ),
-        ],
-    )
-
-
 # ============================================================================
 # LAYOUT
 # ============================================================================
@@ -1094,7 +777,6 @@ app.layout = html.Div(
     className="container",
     children=[
         dcc.Store(id="lark-classification-store", data=None),
-        dcc.Store(id="territory-store", data=None),
 
         html.Div(
             className="header",
@@ -1426,35 +1108,22 @@ app.layout = html.Div(
                                             style={"marginTop": "6px", "marginBottom": "10px"},
                                         ),
 
-                                        html.Div(
-                                            style={
-                                                "display": "flex",
-                                                "gap": "14px",
-                                                "alignItems": "stretch",
-                                            },
-                                            children=[
-                                                html.Div(
-                                                    style={"flex": "1 1 auto", "minWidth": "0"},
-                                                    children=dcc.Loading(
-                                                        type="default",
-                                                        children=dcc.Graph(
-                                                            id="trajectory-graph",
-                                                            figure=build_figure(
-                                                                load_trajectory_dataframe(),
-                                                                default_pi_setup(),
-                                                                "Klicke auf „Trajektorie berechnen“, um die Trajektorien zu laden.",
-                                                                aspect_mode="data",
-                                                                group_by_bird=True,
-                                                                group_column="determined_track_id",
-                                                                trajectory_lines=True,
-                                                            ),
-                                                            config={"responsive": True},
-                                                            style={"height": "1000px"},
-                                                        ),
-                                                    ),
+                                        dcc.Loading(
+                                            type="default",
+                                            children=dcc.Graph(
+                                                id="trajectory-graph",
+                                                figure=build_figure(
+                                                    load_trajectory_dataframe(),
+                                                    default_pi_setup(),
+                                                    "Klicke auf „Trajektorie berechnen“, um die Trajektorien zu laden.",
+                                                    aspect_mode="data",
+                                                    group_by_bird=True,
+                                                    group_column="determined_track_id",
+                                                    trajectory_lines=True,
                                                 ),
-                                                build_side_panel(),
-                                            ],
+                                                config={"responsive": True},
+                                                style={"height": "1000px"},
+                                            ),
                                         ),
 
                                         html.Div(className="divider"),
@@ -1938,21 +1607,6 @@ def classify_larks(_n_clicks):
         for result in results
     ]
 
-    # Merkmale und Begruendungen je Track fuer das Detail-Seitenpanel.
-    # Bisher wurden result.reasons und result.features berechnet und wieder
-    # verworfen - hier landen sie im Store, damit das Panel sie ohne eine
-    # zweite Klassifikation anzeigen kann.
-    details = {
-        result.track_id: {
-            "is_feldlerche": "Ja" if result.is_feldlerche else "Nein",
-            "score": result.score,
-            "classification_path": result.classification_path,
-            "features": features_to_dict(result.features),
-            "criteria": result.criteria,
-        }
-        for result in results
-    }
-
     evaluation = evaluate_against_ground_truth(records, results)
 
     status = f"Status: {len(results)} Tracks klassifiziert."
@@ -1963,25 +1617,18 @@ def classify_larks(_n_clicks):
             f"Accuracy={evaluation['accuracy']})"
         )
 
-    return table_data, status, {"rows": table_data, "details": details}
+    return table_data, status, table_data
 
 
 @app.callback(
     Output("trajectory-graph", "figure", allow_duplicate=True),
     Input("track-visibility-filter", "value"),
     Input("lark-classification-store", "data"),
-    Input("territory-store", "data"),
     State("pi-setup-table", "data"),
     State("aspect-mode-toggle", "value"),
     prevent_initial_call=True,
 )
-def update_trajectory_visibility(
-    visibility_filter,
-    classification_data,
-    territory_data,
-    pi_setup_rows,
-    aspect_mode,
-):
+def update_trajectory_visibility(visibility_filter, classification_data, pi_setup_rows, aspect_mode):
     """
     Setzt die Anfangssichtbarkeit aller Tracks im 3D-Graph basierend auf
     dem gewaehlten Modus:
@@ -2007,7 +1654,6 @@ def update_trajectory_visibility(
         "group_by_bird": True,
         "group_column": "determined_track_id",
         "trajectory_lines": True,
-        "territories": territory_data,
     }
 
     trajectory_df = load_trajectory_dataframe()
@@ -2045,7 +1691,7 @@ def update_trajectory_visibility(
 
         lark_track_ids = {
             str(item.get("track_id"))
-            for item in classification_rows(classification_data)
+            for item in classification_data
             if item.get("is_feldlerche") == "Ja"
         }
 
@@ -2078,319 +1724,6 @@ def update_trajectory_visibility(
         track_visibility=track_visibility,
         **figure_options,
     )
-
-
-# ============================================================================
-# CALLBACKS: REVIERSCHÄTZUNG UND TRACK-DETAIL
-# ============================================================================
-def build_territory_card(estimate) -> html.Div:
-    """Eine Karte je geschätztem Revierzentrum für das Seitenpanel."""
-    if estimate.error_m is None:
-        error_child = html.Span("keine Ground Truth", style={"color": "var(--muted)"})
-    elif estimate.error_m <= 5.0:
-        error_child = html.Span(f"{estimate.error_m:.1f} m", style={"color": "var(--good)"})
-    elif estimate.error_m <= 15.0:
-        error_child = html.Span(f"{estimate.error_m:.1f} m", style={"color": "var(--warn)"})
-    else:
-        error_child = html.Span(f"{estimate.error_m:.1f} m", style={"color": "var(--bad)"})
-
-    value_style = {"fontFamily": "ui-monospace, monospace", "color": "var(--text)"}
-    label_style = {"color": "var(--muted)"}
-
-    children = [
-        html.Div(
-            estimate.track_id,
-            style={
-                "fontFamily": "ui-monospace, monospace",
-                "fontSize": "12px",
-                "color": "var(--text)",
-                "marginBottom": "7px",
-            },
-        ),
-        html.Div(
-            style={
-                "display": "grid",
-                "gridTemplateColumns": "1fr 1fr",
-                "gap": "6px 10px",
-                "fontSize": "11px",
-            },
-            children=[
-                html.Div([html.Div("Zentrum", style=label_style),
-                          html.Div(f"{estimate.center_e:.1f} / {estimate.center_n:.1f}", style=value_style)]),
-                html.Div([html.Div("Radius", style=label_style),
-                          html.Div(f"{estimate.radius:.1f} m", style=value_style)]),
-                html.Div([html.Div("Punkte", style=label_style),
-                          html.Div(str(estimate.sample_count), style=value_style)]),
-                html.Div([html.Div("Abweichung", style=label_style),
-                          html.Div(error_child, style={"fontFamily": "ui-monospace, monospace"})]),
-            ],
-        ),
-    ]
-
-    if estimate.note:
-        children.append(
-            html.Div(
-                estimate.note,
-                style={"fontSize": "10px", "color": "var(--warn)", "marginTop": "6px"},
-            )
-        )
-
-    return html.Div(
-        style={
-            "border": "1px solid var(--border)",
-            "borderRadius": "12px",
-            "background": "rgba(255,255,255,0.02)",
-            "padding": "11px",
-        },
-        children=children,
-    )
-
-
-@app.callback(
-    Output("territory-store", "data"),
-    Output("territory-status", "children"),
-    Output("territory-cards", "children"),
-    Input("btn-estimate-territories", "n_clicks"),
-    Input("territory-method", "value"),
-    State("lark-classification-store", "data"),
-    prevent_initial_call=True,
-)
-def estimate_territory_centers(_n_clicks, method, classification_data):
-    """
-    Schätzt aus den als Feldlerche klassifizierten Tracks je ein
-    Revierzentrum und legt das Ergebnis im Store ab, damit der 3D-Plot
-    Zentrum, Revierkreis und Abweichung zur Ground Truth zeichnen kann.
-
-    Ein Wechsel des Schätzverfahrens rechnet direkt neu — so lassen sich
-    die drei Verfahren ohne erneute Klassifikation vergleichen.
-    """
-    rows = classification_rows(classification_data)
-
-    if not rows:
-        return None, "Status: Bitte zuerst „Feldlerchen klassifizieren“ ausführen.", []
-
-    records = extract_trajectory_records(load_trajectory_payload())
-
-    if not records:
-        return None, "Status: Keine Trajektoriendaten gefunden.", []
-
-    lark_track_ids = [
-        str(row.get("track_id"))
-        for row in rows
-        if row.get("is_feldlerche") == "Ja"
-    ]
-
-    if not lark_track_ids:
-        return None, "Status: Keine Tracks als Feldlerche klassifiziert.", []
-
-    selected_method = method if method in AVAILABLE_METHODS else DEFAULT_METHOD
-
-    estimates = estimate_territories(
-        records,
-        track_ids=lark_track_ids,
-        group_column="determined_track_id",
-        method=selected_method,
-    )
-
-    if not estimates:
-        return None, "Status: Zu wenige Punkte je Track für eine Schätzung.", []
-
-    serialised = [
-        {
-            "track_id": estimate.track_id,
-            "center_e": estimate.center_e,
-            "center_n": estimate.center_n,
-            "radius": estimate.radius,
-            "method": estimate.method,
-            "method_label": estimate.method_label,
-            "sample_count": estimate.sample_count,
-            "true_nest_e": estimate.true_nest_e,
-            "true_nest_n": estimate.true_nest_n,
-            "error_m": estimate.error_m,
-            "note": estimate.note,
-        }
-        for estimate in estimates
-    ]
-
-    evaluation = evaluate_estimates(estimates)
-
-    status = (
-        f"Status: {len(estimates)} Revierzentren geschätzt "
-        f"({METHOD_LABELS.get(selected_method, selected_method)})."
-    )
-
-    if evaluation:
-        status += (
-            f" Abweichung zur Ground Truth: Median {evaluation['median_error']} m, "
-            f"p90 {evaluation['p90_error']} m, max {evaluation['max_error']} m."
-        )
-    else:
-        status += (
-            " Keine Nest-Ground-Truth in den Daten — die Abweichung lässt sich "
-            "nur für neu generierte Datensätze berechnen."
-        )
-
-    return serialised, status, [build_territory_card(estimate) for estimate in estimates]
-
-
-@app.callback(
-    Output("track-detail-title", "children"),
-    Output("track-detail-subtitle", "children"),
-    Output("track-detail-profile", "figure"),
-    Output("track-detail-features", "children"),
-    Output("track-detail-reasons", "children"),
-    Input("lark-classification-table", "active_cell"),
-    State("lark-classification-table", "derived_viewport_data"),
-    State("lark-classification-store", "data"),
-    prevent_initial_call=True,
-)
-def show_track_detail(active_cell, viewport_data, classification_data):
-    """
-    Füllt das Detail-Panel für den Track, dessen Zeile angeklickt wurde:
-    Höhenprofil z(t) mit eingefärbten Flugphasen, die Merkmale und die
-    Begründung der Klassifikation.
-    """
-    empty = (
-        "Track-Detail",
-        "Zeile in der Klassifikationstabelle anklicken.",
-        build_altitude_profile_figure(),
-        [],
-        [],
-    )
-
-    if not active_cell or not viewport_data:
-        return empty
-
-    row_index = active_cell.get("row")
-    if row_index is None or row_index >= len(viewport_data):
-        return empty
-
-    track_id = str(viewport_data[row_index].get("track_id", ""))
-    if not track_id:
-        return empty
-
-    records = [
-        record
-        for record in extract_trajectory_records(load_trajectory_payload())
-        if str(record.get("determined_track_id")) == track_id
-    ]
-
-    if not records:
-        return (
-            track_id,
-            "Keine Punkte zu diesem Track gefunden.",
-            build_altitude_profile_figure(message="Keine Daten"),
-            [],
-            [],
-        )
-
-    detail = classification_details(classification_data).get(track_id, {})
-    is_feldlerche = detail.get("is_feldlerche", "?")
-    score = detail.get("score")
-    path = detail.get("classification_path", "")
-
-    badge_color = "var(--good)" if is_feldlerche == "Ja" else "var(--muted)"
-    title = html.Div(
-        style={"display": "flex", "alignItems": "center", "gap": "8px"},
-        children=[
-            html.Span(
-                track_id,
-                style={"fontFamily": "ui-monospace, monospace", "fontSize": "13px"},
-            ),
-            html.Span(
-                f"{'Feldlerche' if is_feldlerche == 'Ja' else 'keine Feldlerche'}"
-                + (f" · {score}" if score is not None else ""),
-                style={
-                    "fontSize": "11px",
-                    "fontWeight": "700",
-                    "color": badge_color,
-                },
-            ),
-        ],
-    )
-
-    subtitle = f"{len(records)} Punkte · Entscheidungspfad: {path or 'unbekannt'}"
-
-    figure = build_altitude_profile_figure(records, track_id=track_id)
-
-    feature_rows = format_feature_rows(detail.get("features"))
-    if feature_rows:
-        features_children = [
-            html.Div("Merkmale", className="label", style={"marginBottom": "6px"}),
-            html.Div(
-                style={
-                    "display": "grid",
-                    "gridTemplateColumns": "1fr 1fr",
-                    "gap": "6px 10px",
-                    "fontSize": "11px",
-                },
-                children=[
-                    html.Div(
-                        [
-                            html.Div(label, style={"color": "var(--muted)"}),
-                            html.Div(
-                                value,
-                                style={
-                                    "fontFamily": "ui-monospace, monospace",
-                                    "color": "var(--text)",
-                                },
-                            ),
-                        ]
-                    )
-                    for label, value in feature_rows
-                ],
-            ),
-        ]
-    else:
-        features_children = [
-            html.Div(
-                "Merkmale erst nach dem Klassifizieren verfügbar.",
-                style=PANEL_HINT_STYLE,
-            )
-        ]
-
-    criteria = detail.get("criteria") or []
-    if criteria:
-        reasons_children = [
-            html.Div("Begründung", className="label", style={"marginBottom": "6px"}),
-            html.Div(
-                style={"display": "flex", "flexDirection": "column", "gap": "7px"},
-                children=[
-                    html.Div(
-                        style={"display": "flex", "gap": "8px", "alignItems": "flex-start"},
-                        children=[
-                            html.Span(
-                                "✓" if criterion.get("met") else "✗",
-                                style={
-                                    "color": "var(--good)" if criterion.get("met") else "var(--bad)",
-                                    "fontSize": "12px",
-                                    "lineHeight": "1.35",
-                                },
-                            ),
-                            html.Span(
-                                criterion.get("text", ""),
-                                style={
-                                    "fontSize": "11px",
-                                    "color": "var(--text)" if criterion.get("met") else "var(--muted)",
-                                    "lineHeight": "1.4",
-                                },
-                            ),
-                        ],
-                    )
-                    for criterion in criteria
-                    if criterion.get("text")
-                ],
-            ),
-        ]
-    else:
-        reasons_children = [
-            html.Div(
-                "Begründung erst nach dem Klassifizieren verfügbar.",
-                style=PANEL_HINT_STYLE,
-            )
-        ]
-
-    return title, subtitle, figure, features_children, reasons_children
 
 
 # ============================================================================

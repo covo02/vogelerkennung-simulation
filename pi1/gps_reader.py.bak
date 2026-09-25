@@ -1,0 +1,200 @@
+# -*- coding: utf-8 -*-
+# ------------------------------------------------------------------------------
+# gps_reader.py – GPS via gpsd (Drop-in Replacement für altes Serial/NMEA-Modul)
+# ------------------------------------------------------------------------------
+# - Liefert RAW + AVG wie vorher
+# - Thread startet bei Import
+# - Quelle: gpsd (localhost:2947) statt /dev/ttyAMA0
+# - Bewusst kompatibel gehalten für Trigger/Header/Webinterface
+# ------------------------------------------------------------------------------
+import time
+import threading
+from datetime import datetime, timezone
+from collections import deque
+
+# ======= Konfiguration =======
+SAMPLE_WINDOW_SIZE = 200          # Anzahl Samples für Mittelung
+UPDATE_INTERVAL = 5               # Sekunden für Debugausgabe
+DEBUG = True                      # Debugprint
+ENABLE_NTP_SERVER = False         # bleibt als Flag, Funktion existiert noch (unused)
+
+# ======= History / Zustand =======
+history_lat = deque(maxlen=SAMPLE_WINDOW_SIZE)
+history_lon = deque(maxlen=SAMPLE_WINDOW_SIZE)
+history_alt_gps = deque(maxlen=SAMPLE_WINDOW_SIZE)
+
+_sensor_ok = False
+_lock = threading.Lock()
+
+_last_valid_raw = {"lat": None, "lon": None, "alt": None, "timestamp": None}
+
+# optional: zuletzt vom GPS gemeldete Zeit (nicht Systemzeit)
+_last_gps_time_iso = None
+
+
+def avg(dq):
+    return sum(dq) / len(dq) if dq else None
+
+
+def set_system_time_from_gps(gps_datetime):
+    # Zeit wird nicht mehr durch Python gesetzt
+    return
+
+
+def start_ntp_server():
+    # Alt-Funktion bewusst drin gelassen, aber in deinem Setup nutzt du chrony sauber.
+    return
+
+
+def _iso_now_utc():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _gps_loop():
+    """
+    Liest kontinuierlich TPV Reports aus gpsd.
+    Updates:
+      - history_lat/lon/alt_gps (AVG)
+      - _last_valid_raw (RAW)
+      - _sensor_ok
+    """
+    global _sensor_ok, _last_valid_raw, _last_gps_time_iso
+
+    try:
+        import gps  # python3-gps
+    except Exception as e:
+        print(f"[GPS] FEHLER: python gps module fehlt oder kaputt: {e}")
+        print("[GPS] Install: sudo apt install -y python3-gps gpsd gpsd-clients")
+        return
+
+    # gpsd Session
+    try:
+        session = gps.gps(mode=gps.WATCH_ENABLE | gps.WATCH_NEWSTYLE)
+    except Exception as e:
+        print(f"[GPS] FEHLER: kann gpsd nicht öffnen (läuft gpsd?): {e}")
+        _sensor_ok = False
+        return
+
+    last_print = time.time()
+
+    while True:
+        try:
+            report = session.next()
+        except Exception:
+            # gpsd kurz weg / socket glitch
+            with _lock:
+                _sensor_ok = False
+            time.sleep(0.2)
+            continue
+
+        # Wir interessieren uns primär für TPV
+        if getattr(report, "class", None) != "TPV":
+            continue
+
+        # gpsd liefert mode: 0/1/2/3
+        mode = getattr(report, "mode", 0)
+
+        lat = getattr(report, "lat", None)
+        lon = getattr(report, "lon", None)
+
+        # alt: gpsd kann alt (meist MSL) liefern; altMSL gibt’s nicht immer im python wrapper
+        alt = getattr(report, "alt", None)
+        if alt is None:
+            alt = 0.0
+
+        # GPS time (aus gpsd), nicht Systemzeit
+        gps_time = getattr(report, "time", None)  # meist ISO string "....Z"
+        if gps_time:
+            _last_gps_time_iso = str(gps_time)
+
+        # Validität prüfen wie vorher (kein Fix / 0/0 rausfiltern)
+        valid_fix = (mode >= 2) and (lat is not None) and (lon is not None) and (lat != 0.0) and (lon != 0.0)
+
+        with _lock:
+            if valid_fix:
+                history_lat.append(float(lat))
+                history_lon.append(float(lon))
+                if alt not in (None, 0, 0.0):
+                    history_alt_gps.append(float(alt))
+
+                _sensor_ok = True
+
+                _last_valid_raw = {
+                    "lat": float(lat),
+                    "lon": float(lon),
+                    "alt": float(alt) if alt is not None else 0.0,
+                    "timestamp": _iso_now_utc(),
+                }
+            else:
+                _sensor_ok = False
+
+        # Debugausgabe (ähnlich alt)
+        if DEBUG and (time.time() - last_print) >= UPDATE_INTERVAL:
+            with _lock:
+                msg_txt = (
+                    f"AVG: lat={avg(history_lat)}, lon={avg(history_lon)}, alt={avg(history_alt_gps)}\n"
+                    f"GPS Time: {_last_gps_time_iso if _last_gps_time_iso else 'N/A'}\n"
+                    f"RAW: lat={lat}, lon={lon}, alt={alt}, mode={mode}\n"
+                    + "-" * 40
+                )
+            print(msg_txt)
+            last_print = time.time()
+
+        time.sleep(0.05)
+
+
+def get_gps_data():
+    """
+    Wie vorher: liefert gemittelte Daten + Sample-Zähler.
+    """
+    with _lock:
+        lat = avg(history_lat)
+        lon = avg(history_lon)
+        alt = avg(history_alt_gps)
+
+        return {
+            "lat": lat,
+            "lon": lon,
+            "alt": alt,
+            "timestamp": None,  # bewusst wie vorher
+            "samples_lat": len(history_lat),
+            "samples_lon": len(history_lon),
+            "samples_alt_gps": len(history_alt_gps),
+        }
+
+
+def get_gps_raw():
+    """
+    Wie vorher:
+    - Wenn Sensor OK: letzter Punkt
+    - Wenn nicht OK: letzter gültiger Punkt (Fallback)
+    - Wenn nie gültig: 0/0/0
+    """
+    with _lock:
+        if _sensor_ok and _last_valid_raw["lat"] is not None:
+            return dict(_last_valid_raw)
+
+        if _last_valid_raw["lat"] is not None:
+            return dict(_last_valid_raw)
+
+        return {"lat": 0.0, "lon": 0.0, "alt": 0.0, "timestamp": None}
+
+
+# ======= optional: Start NTP-Server falls aktiviert (bei dir i.d.R. AUS) =======
+if ENABLE_NTP_SERVER:
+    start_ntp_server()
+
+# ======= Thread starten =======
+_thread = threading.Thread(target=_gps_loop, daemon=True)
+_thread.start()
+
+# ======= Direktlauf für Test/Debug =======
+if __name__ == "__main__":
+    print("[GPS] gps_reader läuft (gpsd). CTRL+C zum Beenden.")
+    try:
+        while True:
+            print(f"[GPS] AVG: {get_gps_data()}")
+            print(f"[GPS] RAW: {get_gps_raw()}")
+            time.sleep(UPDATE_INTERVAL)
+    except KeyboardInterrupt:
+        print("[GPS] Beendet.")

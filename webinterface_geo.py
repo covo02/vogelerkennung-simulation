@@ -46,12 +46,71 @@ from helper_functions.track_detail import (
     features_to_dict,
     format_feature_rows,
 )
+from helper_functions.geo_export import (
+    derive_pi_positions,
+    enu_to_wgs84,
+    format_coordinates,
+    maps_directions_url,
+    maps_satellite_url,
+    maps_url,
+    reference_from_pi_rows,
+    territories_to_geojson,
+)
+from helper_functions.pi_map import (
+    build_pi_map_figure,
+    center_from_relayout,
+)
 
 
 # ============================================================================
 # KONFIGURATION
 # ============================================================================
-APP_PORT = 8060
+# Testversion mit GeoJSON-Export. Läuft auf einem eigenen Port, damit sie
+# parallel zur unveränderten webinterface.py gestartet werden kann.
+APP_PORT = 8061
+
+# ============================================================================
+# GEOREFERENZ
+# ============================================================================
+# Frei gewählter Referenzpunkt für den Kartenexport: die Position, an der
+# pi_1 stehen würde. pi_1 liegt im ENU-System bei (0, 0, 0), damit ist
+# dieser eine Punkt der Ortsbezug der gesamten simulierten Fläche.
+#
+# Die Vorbelegung liegt auf einer großen zusammenhängenden Ackerfläche
+# etwa 11 km nördlich von Bielefeld. Sie wurde ausgewählt, indem in
+# OpenStreetMap nach Flächen mit landuse=farmland gesucht wurde, in die
+# ein Quadrat von 300 x 300 m vollständig hineinpasst, und das Ergebnis
+# anschließend auf Luftbildern geprüft wurde. Damit stehen alle drei
+# Stationen auf offenem Feld und nicht in einer Hecke oder Bebauung —
+# passend zum Lebensraum der Feldlerche.
+#
+# ACHTUNG: Hier wurde nichts vor Ort eingemessen. Der Punkt dient nur
+# dazu, die Simulationsergebnisse überhaupt auf einer Karte darstellen
+# zu können. Über die Karte im Tab "Kameras" lässt er sich beliebig
+# verschieben.
+GEO_REFERENCE_LAT = 52.124165
+GEO_REFERENCE_LON = 8.500326
+
+
+def default_pi_setup_with_coordinates() -> list[dict]:
+    """
+    Standard-Pi-Aufbau, ergänzt um Breiten- und Längengrad je Station.
+
+    Die erste Station definiert den ENU-Ursprung. Die weiteren Werte sind
+    so gewählt, dass sie zu den Metern des Standardaufbaus passen
+    (300 m östlich bzw. 300 m nördlich der ersten Station).
+    """
+    rows = default_pi_setup()
+
+    for row in rows:
+        latitude, longitude = enu_to_wgs84(
+            float(row["x"]), float(row["y"]), GEO_REFERENCE_LAT, GEO_REFERENCE_LON
+        )
+        row["lat"] = round(latitude, 6)
+        row["lon"] = round(longitude, 6)
+
+    return rows
+
 
 BASE_DIR = Path(__file__).resolve().parent
 TRAJECTORY_SCRIPT = BASE_DIR / "trajectory.py"
@@ -1050,6 +1109,31 @@ def build_side_panel() -> html.Div:
                         },
                         children=[],
                     ),
+                    html.Div(
+                        style={
+                            "height": "1px",
+                            "background": "var(--border)",
+                            "margin": "14px 0 12px",
+                        }
+                    ),
+                    html.Button(
+                        "Als GeoJSON exportieren",
+                        id="btn-export-geojson",
+                        n_clicks=0,
+                        className="btn",
+                        style={"width": "100%"},
+                    ),
+                    dcc.Download(id="geojson-download"),
+                    html.Div(
+                        "Öffnet sich in QGIS oder Google Earth. Referenzpunkt im Tab „Kameras“.",
+                        id="geojson-status",
+                        style={
+                            "marginTop": "8px",
+                            "fontSize": "11px",
+                            "color": "var(--muted)",
+                            "lineHeight": "1.5",
+                        },
+                    ),
                 ],
             ),
             html.Div(
@@ -1095,6 +1179,7 @@ app.layout = html.Div(
     children=[
         dcc.Store(id="lark-classification-store", data=None),
         dcc.Store(id="territory-store", data=None),
+        dcc.Store(id="pi-map-center", data=None),
 
         html.Div(
             className="header",
@@ -1103,6 +1188,11 @@ app.layout = html.Div(
                     className="title",
                     children=[
                         html.H1("Flugtrajektorien", className="h1"),
+                        html.Span(
+                            "Testversion mit GeoJSON-Export · Port 8061",
+                            className="badge",
+                            style={"marginLeft": "10px"},
+                        ),
                         html.P(
                             "Berechnung und 3D-Visualisierung",
                             className="sub",
@@ -1173,9 +1263,98 @@ app.layout = html.Div(
                                             ],
                                         ),
 
+                                        html.Div(
+                                            style={
+                                                "border": "1px solid var(--border)",
+                                                "borderRadius": "12px",
+                                                "background": "rgba(255,255,255,0.02)",
+                                                "padding": "12px 14px",
+                                                "marginBottom": "14px",
+                                            },
+                                            children=[
+                                                html.Div(
+                                                    "Standorte auf der Karte setzen",
+                                                    className="label",
+                                                    style={"marginBottom": "6px"},
+                                                ),
+                                                html.Div(
+                                                    (
+                                                        "Karte verschieben, bis das gelbe Fadenkreuz auf der "
+                                                        "gewünschten Stelle liegt, dann die Station dorthin setzen. "
+                                                        "Die erste Station bildet den Ursprung des ENU-Systems, "
+                                                        "also (0/0) — die Meterwerte der übrigen Stationen werden "
+                                                        "beim Setzen automatisch neu berechnet."
+                                                    ),
+                                                    className="sub",
+                                                ),
+                                                dcc.Graph(
+                                                    id="pi-map",
+                                                    figure=build_pi_map_figure(
+                                                        default_pi_setup_with_coordinates()
+                                                    ),
+                                                    config={
+                                                        "displayModeBar": False,
+                                                        "scrollZoom": True,
+                                                        "responsive": True,
+                                                    },
+                                                    style={
+                                                        "height": "460px",
+                                                        "marginTop": "10px",
+                                                        "borderRadius": "12px",
+                                                        "overflow": "hidden",
+                                                    },
+                                                ),
+                                                html.Div(
+                                                    className="row",
+                                                    style={"marginTop": "10px"},
+                                                    children=[
+                                                        html.Button(
+                                                            "Pi 1 hierhin",
+                                                            id="btn-place-pi-1",
+                                                            n_clicks=0,
+                                                            className="btn",
+                                                        ),
+                                                        html.Button(
+                                                            "Pi 2 hierhin",
+                                                            id="btn-place-pi-2",
+                                                            n_clicks=0,
+                                                            className="btn",
+                                                        ),
+                                                        html.Button(
+                                                            "Pi 3 hierhin",
+                                                            id="btn-place-pi-3",
+                                                            n_clicks=0,
+                                                            className="btn",
+                                                        ),
+                                                        html.Button(
+                                                            "X / Y aus Koordinaten berechnen",
+                                                            id="btn-derive-pi-positions",
+                                                            n_clicks=0,
+                                                            className="btn",
+                                                        ),
+                                                    ],
+                                                ),
+                                                html.Div(
+                                                    (
+                                                        "Nur nötig, wenn die Standorte per GPS aufgenommen wurden. "
+                                                        "Achtung: handelsübliches GPS streut um 2–5 m, und für die "
+                                                        "Triangulation zählt die relative Geometrie der Stationen. "
+                                                        "Wo die Abstände direkt messbar sind (Maßband, Laser, RTK), "
+                                                        "sind die eingetragenen Meter genauer als der Umweg über GPS. "
+                                                        "Für den Kartenbezug allein reicht grobes GPS völlig. "
+                                                        "Die voreingestellten Koordinaten sind ein Platzhalter im "
+                                                        "Raum Bielefeld und wurden nicht eingemessen."
+                                                    ),
+                                                    id="pi-geo-status",
+                                                    className="sub",
+                                                    style={"marginTop": "8px"},
+                                                ),
+                                            ],
+                                        ),
+
                                         dash_table.DataTable(
                                             id="pi-setup-table",
-                                            data=default_pi_setup(),
+                                            data=default_pi_setup_with_coordinates(),
                                             columns=[
                                                 {"name": "Name", "id": "name", "editable": False},
                                                 {"name": "X", "id": "x", "type": "numeric"},
@@ -1184,6 +1363,8 @@ app.layout = html.Div(
                                                 {"name": "Yaw um Z [°]", "id": "yaw_deg", "type": "numeric"},
                                                 {"name": "Pitch hoch/runter [°]", "id": "pitch_deg", "type": "numeric"},
                                                 {"name": "Roll [°]", "id": "roll_deg", "type": "numeric"},
+                                                {"name": "Breite", "id": "lat", "type": "numeric"},
+                                                {"name": "Länge", "id": "lon", "type": "numeric"},
                                             ],
                                             editable=True,
                                             row_deletable=False,
@@ -2083,7 +2264,200 @@ def update_trajectory_visibility(
 # ============================================================================
 # CALLBACKS: REVIERSCHÄTZUNG UND TRACK-DETAIL
 # ============================================================================
-def build_territory_card(estimate) -> html.Div:
+@app.callback(
+    Output("pi-map-center", "data"),
+    Input("pi-map", "relayoutData"),
+    State("pi-map-center", "data"),
+    prevent_initial_call=True,
+)
+def remember_map_center(relayout_data, previous_center):
+    """
+    Merkt sich Mittelpunkt und Zoom der Karte.
+
+    Plotly meldet Klicks nur auf Datenpunkten, nicht auf freier
+    Kartenfläche. Statt zu klicken verschiebt man deshalb die Karte unter
+    das feste Fadenkreuz — und dafür muss bekannt sein, wo die Mitte
+    gerade liegt. Der Wert hält außerdem den Ausschnitt fest, wenn die
+    Karte nach einer Änderung neu gezeichnet wird.
+    """
+    center = center_from_relayout(relayout_data, previous_center)
+
+    return center if center else no_update
+
+
+@app.callback(
+    Output("pi-setup-table", "data", allow_duplicate=True),
+    Output("pi-geo-status", "children", allow_duplicate=True),
+    Input("btn-place-pi-1", "n_clicks"),
+    Input("btn-place-pi-2", "n_clicks"),
+    Input("btn-place-pi-3", "n_clicks"),
+    State("pi-map-center", "data"),
+    State("pi-setup-table", "data"),
+    prevent_initial_call=True,
+)
+def place_pi_on_map(_c1, _c2, _c3, center, pi_setup_rows):
+    """
+    Setzt die gewählte Station auf die aktuelle Kartenmitte und rechnet
+    anschließend die Meterwerte aller Stationen neu.
+    """
+    if not center or center.get("lat") is None:
+        return no_update, (
+            "Verschiebe zuerst die Karte — erst danach ist die Zielposition bekannt."
+        )
+
+    if not pi_setup_rows:
+        return no_update, "Keine Pi-Stationen vorhanden."
+
+    index_by_button = {
+        "btn-place-pi-1": 0,
+        "btn-place-pi-2": 1,
+        "btn-place-pi-3": 2,
+    }
+    index = index_by_button.get(ctx.triggered_id)
+
+    if index is None or index >= len(pi_setup_rows):
+        return no_update, "Diese Station gibt es in der Tabelle nicht."
+
+    rows = [dict(row) for row in pi_setup_rows]
+    rows[index]["lat"] = round(float(center["lat"]), 6)
+    rows[index]["lon"] = round(float(center["lon"]), 6)
+
+    updated, error = derive_pi_positions(rows)
+
+    if error:
+        return rows, error
+
+    name = str(updated[index].get("name", f"Pi {index + 1}"))
+    status = (
+        f"{name} auf {rows[index]['lat']:.6f}, {rows[index]['lon']:.6f} gesetzt. "
+        f"X / Y neu berechnet: "
+        + ", ".join(
+            f"{row.get('name', '?')} = {row.get('x')} / {row.get('y')}"
+            for row in updated
+        )
+        + ". Gemessene Abstände kannst du in der Tabelle weiterhin von Hand "
+        "überschreiben — sie sind genauer als die Kartenposition."
+    )
+
+    return updated, status
+
+
+@app.callback(
+    Output("pi-map", "figure"),
+    Input("pi-setup-table", "data"),
+    State("pi-map-center", "data"),
+)
+def update_pi_map(pi_setup_rows, center):
+    """Zeichnet die Karte neu, wenn sich Standorte geändert haben."""
+    return build_pi_map_figure(pi_setup_rows or [], center=center)
+
+
+@app.callback(
+    Output("pi-setup-table", "data", allow_duplicate=True),
+    Output("pi-geo-status", "children"),
+    Input("btn-derive-pi-positions", "n_clicks"),
+    State("pi-setup-table", "data"),
+    prevent_initial_call=True,
+)
+def derive_positions_from_coordinates(_n_clicks, pi_setup_rows):
+    """
+    Rechnet die GPS-Koordinaten der Stationen in lokale ENU-Meter um und
+    schreibt sie in die Spalten X und Y. Die erste Zeile wird zum
+    Ursprung (0/0).
+
+    Das ist die Richtung, die ein Livesystem braucht: im Feld nimmt man
+    Breiten- und Längengrad auf, gerechnet wird danach in Metern.
+    """
+    updated, error = derive_pi_positions(pi_setup_rows or [])
+
+    if error:
+        return no_update, error
+
+    distances = []
+    origin = updated[0]
+
+    for row in updated[1:]:
+        try:
+            distance = math.hypot(
+                float(row["x"]) - float(origin["x"]),
+                float(row["y"]) - float(origin["y"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        distances.append(f"{row.get('name', row.get('id', '?'))}: {distance:.1f} m")
+
+    status = "X und Y aus den Koordinaten berechnet."
+    if distances:
+        status += " Abstand zur ersten Station — " + ", ".join(distances) + "."
+    status += (
+        " Vergleiche diese Werte mit den tatsächlich gemessenen Abständen: "
+        "weichen sie stark ab, war das GPS zu ungenau für die Triangulation."
+    )
+
+    return updated, status
+
+
+def territory_map_links(estimate, reference) -> html.Div | None:
+    """
+    Koordinate und Kartenlinks zu einem geschätzten Revierzentrum.
+
+    Ohne Georeferenz in der Pi-Tabelle gibt es nichts anzuzeigen, dann
+    wird None zurückgegeben.
+    """
+    if reference is None:
+        return None
+
+    reference_latitude, reference_longitude = reference
+
+    latitude, longitude = enu_to_wgs84(
+        estimate.center_e, estimate.center_n, reference_latitude, reference_longitude
+    )
+
+    link_style = {"fontSize": "11px", "marginRight": "10px"}
+
+    return html.Div(
+        style={
+            "marginTop": "9px",
+            "paddingTop": "9px",
+            "borderTop": "1px solid var(--border)",
+        },
+        children=[
+            html.Div(
+                format_coordinates(latitude, longitude),
+                style={
+                    "fontFamily": "ui-monospace, monospace",
+                    "fontSize": "11px",
+                    "color": "var(--text)",
+                    "marginBottom": "6px",
+                },
+            ),
+            html.Div(
+                children=[
+                    html.A(
+                        "Karte",
+                        href=maps_url(latitude, longitude),
+                        target="_blank",
+                        style=link_style,
+                    ),
+                    html.A(
+                        "Satellit",
+                        href=maps_satellite_url(latitude, longitude),
+                        target="_blank",
+                        style=link_style,
+                    ),
+                    html.A(
+                        "Navigation",
+                        href=maps_directions_url(latitude, longitude),
+                        target="_blank",
+                        style=link_style,
+                    ),
+                ]
+            ),
+        ],
+    )
+
+
+def build_territory_card(estimate, reference=None) -> html.Div:
     """Eine Karte je geschätztem Revierzentrum für das Seitenpanel."""
     if estimate.error_m is None:
         error_child = html.Span("keine Ground Truth", style={"color": "var(--muted)"})
@@ -2135,6 +2509,10 @@ def build_territory_card(estimate) -> html.Div:
             )
         )
 
+    map_links = territory_map_links(estimate, reference)
+    if map_links is not None:
+        children.append(map_links)
+
     return html.Div(
         style={
             "border": "1px solid var(--border)",
@@ -2153,9 +2531,10 @@ def build_territory_card(estimate) -> html.Div:
     Input("btn-estimate-territories", "n_clicks"),
     Input("territory-method", "value"),
     State("lark-classification-store", "data"),
+    State("pi-setup-table", "data"),
     prevent_initial_call=True,
 )
-def estimate_territory_centers(_n_clicks, method, classification_data):
+def estimate_territory_centers(_n_clicks, method, classification_data, pi_setup_rows):
     """
     Schätzt aus den als Feldlerche klassifizierten Tracks je ein
     Revierzentrum und legt das Ergebnis im Store ab, damit der 3D-Plot
@@ -2230,7 +2609,76 @@ def estimate_territory_centers(_n_clicks, method, classification_data):
             "nur für neu generierte Datensätze berechnen."
         )
 
-    return serialised, status, [build_territory_card(estimate) for estimate in estimates]
+    reference = reference_from_pi_rows(pi_setup_rows)
+
+    if reference is None:
+        status += (
+            " Für Koordinaten und Kartenlinks braucht die erste Pi-Station "
+            "Breite und Länge (Tab „Kameras“)."
+        )
+
+    return (
+        serialised,
+        status,
+        [build_territory_card(estimate, reference) for estimate in estimates],
+    )
+
+
+@app.callback(
+    Output("geojson-download", "data"),
+    Output("geojson-status", "children"),
+    Input("btn-export-geojson", "n_clicks"),
+    State("territory-store", "data"),
+    State("pi-setup-table", "data"),
+    prevent_initial_call=True,
+)
+def export_territories_geojson(_n_clicks, territory_data, pi_setup_rows):
+    """
+    Exportiert die geschätzten Reviere als GeoJSON-Datei zum Download.
+
+    Die ENU-Koordinaten der Simulation werden dafür über den Standort der
+    ersten Pi-Station nach WGS84 umgerechnet — sie definiert ENU (0/0).
+
+    Die Datei ist in den Metadaten und in jedem einzelnen Feature als
+    Simulationsergebnis gekennzeichnet, damit sie nicht mit einer echten
+    Brutvogelkartierung verwechselt werden kann.
+    """
+    if not territory_data:
+        return no_update, "Bitte zuerst Revierzentren schätzen."
+
+    reference = reference_from_pi_rows(pi_setup_rows)
+
+    if reference is None:
+        return no_update, "Die erste Pi-Station braucht Breite und Länge (Tab „Kameras“)."
+
+    reference_latitude, reference_longitude = reference
+
+    if not -90.0 <= reference_latitude <= 90.0:
+        return no_update, "Breitengrad muss zwischen -90 und 90 liegen."
+
+    if not -180.0 <= reference_longitude <= 180.0:
+        return no_update, "Längengrad muss zwischen -180 und 180 liegen."
+
+    payload = territories_to_geojson(
+        territory_data,
+        reference_latitude,
+        reference_longitude,
+        pi_setup=normalize_pi_setup(pi_setup_rows),
+    )
+
+    status = (
+        f"{len(territory_data)} Reviere exportiert, Bezugspunkt "
+        f"{reference_latitude:.4f} / {reference_longitude:.4f}. "
+        "Die Datei ist als Simulationsergebnis gekennzeichnet."
+    )
+
+    return (
+        dict(
+            content=json.dumps(payload, ensure_ascii=False, indent=2),
+            filename="reviere_simulation.geojson",
+        ),
+        status,
+    )
 
 
 @app.callback(

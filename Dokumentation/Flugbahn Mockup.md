@@ -1,196 +1,69 @@
-### Dokumentation der Vogelflugbahn-Generierung
+### Dokumentation der Vogelflugbahn-Simulation
 
-Dieses Kapitel beschreibt das Modul `bird_generation.py`. Es erzeugt simulierte Flugbahnen für allgemeine Vögel und kann zusätzlich Flugbahnen von Feldlerchen über die Funktion `generate_skylarks` aus `helper_functions/skylark_generation.py` ergänzen.
+Dieses Kapitel beschreibt die Funktionsweise des Moduls `bird_generation.py`. Das Modul dient der realitätsnahen Simulation von Vogelflugbahnen und ist speziell für die Integration in eine Dash-Weboberfläche konzipiert. Über die Weboberfläche können Benutzer diverse physikalische und stochastische Parameter anpassen. Die daraus resultierenden Flugbahnen werden anschließend sowohl in 2D- als auch in 3D-Plots visualisiert.
 
-Die Ausgabe besteht aus Positionsmessungen im ENU-Koordinatensystem:
+#### Kernfunktion: Flugbahngenerierung (`generate_birds`)
 
-- `enu_e`: Ostkoordinate (*East*)
-- `enu_n`: Nordkoordinate (*North*)
-- `enu_u`: Höhenkoordinate (*Up*)
+Die Hauptfunktion `generate_birds` bildet das Herzstück der Simulation. Sie erzeugt eine Liste von Datensätzen (Records), wobei jeder Record eine Positionsmessung eines Vogels zu einem bestimmten Zeitpunkt repräsentiert.
 
-#### Kernfunktion: Vögel generieren (`generate_birds`)
+##### 1. Initialisierung und Zufallsgenerator
+Um die Simulationen reproduzierbar zu machen, wird ein Zufallsgenerator (`random.Random`) initialisiert. Falls ein Seed-Wert übergeben wird, nutzt die Funktion diesen. Andernfalls wird der aktuelle Unix-Zeitstempel verwendet, sodass jeder Durchlauf unterschiedliche Ergebnisse liefert.
 
-Die Funktion `generate_birds` erzeugt für jeden gewöhnlichen Vogel eine stochastische Flugbahn. Anschließend werden optional Feldlerchen-Flugbahnen an die Ergebnisliste angehängt.
+##### 2. Definition der Startwerte
 
-##### 1. Zufallsinitialisierung
+Für jeden Vogel im angegebenen Parameter `number_of_birds` (1 bis 500) werden zufällige Startbedingungen generiert:
 
-Für die normalen Vogelflugbahnen wird ein eigener Zufallsgenerator erzeugt:
+- **Anzahl der Messungen:** Jeder Vogel erhält zwischen 3 und 29 simulierte Messpunkte.
+- **Startzeitpunkt:** Ein zufälliger Zeitpunkt am `sim_date` (zwischen 00:00 und 23:30 Uhr).
+- **Startposition:** Die X- und Y-Koordinaten werden gleichmäßig (uniform) innerhalb der Raumgrenzen verteilt und zusätzlich um einen zufälligen Wert aus dem Bereich der `initial_spread` verschoben. Die Z-Koordinate (Höhe) wird rein innerhalb der Z-Grenzen gewählt.
+- **Bewegungsvektoren:** Ein initialer Flugwinkel (0 bis 2π), eine Startgeschwindigkeit (zwischen `min_speed` und `max_speed`) und eine initiale vertikale Steiggeschwindigkeit (zwischen -0.05 und 0.05) werden bestimmt
 
-- Wenn `seed_value` gesetzt ist, wird dieser Wert als Seed verwendet.
-- Wenn `seed_value` den Wert `None` hat, wird der aktuelle Unix-Zeitstempel als Seed verwendet.
+##### 3. Entstehung der Flugbahn (Iterative Bewegungsberechnung)
 
-Bei identischen Eingabeparametern und identischem Seed entstehen reproduzierbare Flugbahnen für die gewöhnlichen Vögel.
-##### 2. Startwerte pro Vogel
+Die eigentliche Flugbahn entsteht durch eine schrittweise, stochastische Fortbewegung. Für jeden Messpunkt eines Vogels wird eine innere Schleife `time_interval`-mal durchlaufen (dieser Wert simuliert den zeitlichen Abstand zwischen zwei Messungen in Sekunden).
 
-Für jeden Vogel wird eine eindeutige ID im Format `bird_XXXX` erzeugt, beispielsweise `bird_0001`.
+In jedem dieser inneren Zeitschritte passiert Folgendes:
 
-Anschließend werden folgende Startwerte zufällig bestimmt:
+1. **Richtungsänderung:** Der Flugwinkel wird um einen gaußverteilten Zufallswert (Mittelwert 0, Varianz `variance_angle`) modifiziert.
+2. **Geschwindigkeitsänderung:** Die Geschwindigkeit wird ebenfalls durch gaußsches Rauschen (`variance_speed`) angepasst und anschließend strikt auf den Bereich zwischen `min_speed` und `max_speed` begrenzt.
+3. **Horizontale Bewegung:** Die X- und Y-Koordinaten werden basierend auf dem neuen Winkel und der neuen Geschwindigkeit mittels Kosinus und Sinus aktualisiert:
 
-- **Anzahl der Messpunkte:** zwischen 3 und 29 Messungen.
-- **Startzeitpunkt:** zufällige Uhrzeit am Datum von `sim_date`.
-  - Stunde zwischen 00 und 23 Uhr
-  - Minute zwischen 00 und 30 Minuten
-  - Sekunde immer `00`
-- **Startposition:**  
-  - `x` und `y` werden zunächst innerhalb der jeweiligen Raumgrenzen gewählt.
-  - Anschließend wird auf beide horizontalen Koordinaten eine zufällige Verschiebung im Bereich von `-initial_spread` bis `+initial_spread` angewendet.
-  - `z` wird direkt zwischen `z_min` und `z_max` gewählt.
-- **Flugrichtung:** zufälliger Winkel zwischen `0` und `2π`.
-- **Startgeschwindigkeit:** zufälliger Wert zwischen `min_speed` und `max_speed`.
-- **Vertikale Startgeschwindigkeit:** zufälliger Wert zwischen `-0.05` und `0.05`.
-##### 3. Iterative Bewegungsberechnung
+``` python
+x += math.cos(angle) * speed
+y += math.sin(angle) * speed
+```
 
-Für jeden gespeicherten Messpunkt wird die Bewegung `time_interval`-mal aktualisiert. Die innere Schleife repräsentiert damit die Bewegungsentwicklung zwischen zwei Messungen.
+1. **Vertikale Bewegung:** Die aktuelle Höhe (`z`) wird um die `vertical_speed` erhöht und zusätzlich um gaußsches Rauschen (`variance_z`) ergänzt. Die Höhe wird auf die Raumgrenzen (`z_min`, `z_max`) beschnitten. Im Anschluss wird die vertikale Steiggeschwindigkeit selbst durch gaußsches Rauschen (`variance_vertical_speed`) verändert, was zu einem realistischen Auf- und Absteigen führt.
 
-Pro internem Bewegungsschritt passiert Folgendes:
+##### 4. Datensatz-Erstellung und Rauschen
 
-1. **Richtungsänderung:**  
-   Der Flugwinkel wird durch gaußverteiltes Rauschen verändert.
+Nach Ablauf der `time_interval`-Schritte wird ein Datensatz für den aktuellen Messpunkt erstellt. Bevor die Koordinaten als ENU-Werte (East, North, Up) gespeichert werden, wird ein finales Positionsrauschen (`position_noise`) addiert, um Messungenauigkeiten realer Sensoren zu simulieren. Die Z-Koordinate erhält ein festes Rauschen von 0.03.
 
-   `angle += rng.gauss(0, variance_angle)`
+Jeder Datensatz enthält:
 
-2. **Geschwindigkeitsänderung:**  
-   Die Geschwindigkeit wird ebenfalls zufällig verändert und danach auf den Bereich zwischen `min_speed` und `max_speed` begrenzt.
+- `bird_id`: Fortlaufende ID des Vogels (z.B. `bird_0001`)
+- `determined_bird_id`: Statisch auf `bird_0000` gesetzt (Platzhalter für spätere Klassifizierung)
+- `timestamp`: Exakter ISO 8601 Zeitstempel
+- `enu_e`, `enu_n`, `enu_u`: Die gerundeten Ost-, Nord- und Höhenkoordinaten.
 
-   `speed += rng.gauss(0, variance_speed)`
-
-3. **Horizontale Bewegung:**  
-   Die neue Position ergibt sich aus Flugwinkel und Geschwindigkeit.
-
-   `x += cos(angle) * speed`  
-   `y += sin(angle) * speed`
-
-4. **Vertikale Bewegung:**  
-   Die Höhe wird um die aktuelle vertikale Geschwindigkeit sowie zusätzliches gaußsches Rauschen verändert.
-
-   `z += vertical_speed`  
-   `z += rng.gauss(0, variance_z)`
-
-   Anschließend wird die interne Höhe auf den Bereich von `z_min` bis `z_max` begrenzt.
-
-5. **Änderung der vertikalen Geschwindigkeit:**  
-   Die vertikale Geschwindigkeit wird selbst durch gaußsches Rauschen verändert.
-
-   `vertical_speed += rng.gauss(0, variance_vertical_speed)`
-
-Die Parameter mit dem Präfix `variance_` werden trotz ihrer Bezeichnung als Standardabweichung für `rng.gauss()` verwendet und nicht als mathematische Varianz.
-##### 4. Erstellung der Positionsdatensätze
-
-Nach den internen Bewegungsschritten wird ein Datensatz erzeugt.
-
-Vor dem Speichern wird zusätzliches Messrauschen auf die Position angewendet:
-
-- Für `enu_e` und `enu_n` wird gaußförmiges Rauschen mit der Standardabweichung `position_noise` verwendet.
-- Für `enu_u` wird unabhängig davon ein festes gaußförmiges Rauschen mit einer Standardabweichung von `0.03` verwendet.
-
-Die Koordinaten werden anschließend auf zwei Nachkommastellen gerundet.
-
-Der Zeitstempel eines Datensatzes wird wie folgt berechnet:
-
-`start_time + sample_index * time_interval`
-##### 5. Ergänzung von Feldlerchen-Flugbahnen
-
-Nach der Generierung aller gewöhnlichen Vögel ruft `generate_birds` die Funktion `generate_skylarks` auf.
-
-Dabei werden unter anderem folgende Werte weitergegeben:
-
-- Anzahl der Feldlerchen
-- Messintervall
-- Simulationsdatum
-- Raumgrenzen
-- Positionsrauschen
-- Seed
-
-Die Feldlerchen-Datensätze werden nach allen normalen Vogel-Datensätzen an die Rückgabeliste angehängt.
-
-Die detaillierte Fluglogik für Feldlerchen, beispielsweise Steigflug, Singflug und spiralförmiger Sinkflug, ist in `helper_functions/skylark_generation.py` implementiert.
-
-Ein Plot der von der Funktion erzeugten Vögel, sieht wie folgt aus:
-
-![[plotted_birds.png|654]]
-#### Hilfsfunktionen
-
+#### Hilfsfunktionen zur Generierung
 ##### `parse_seed`
+Diese Funktion ermöglicht es dem Nutzer, Seeds entweder als Zahl oder als Textwort zu übergeben. Numerische Seeds werden direkt als Integer verwendet. Bei Text-Strings wird ein SHA-256-Hash erstellt, aus dem die ersten 8 Bytes in einen Integer umgewandelt werden. Dies garantiert, dass textbasierte Seeds immer denselben Zahlenwert und damit denselben Simulationsverlauf erzeugen.
 
-Die Funktion wandelt einen eingegebenen Seed in einen reproduzierbaren Integer um.
+##### `build_pi_devices`
 
-- `None` oder ein leerer Text wird zu `None`.
-- Numerische Eingaben werden direkt in einen Integer umgewandelt.
-- Textwerte werden mittels SHA-256 gehasht.
-- Die ersten acht Bytes des Hashes werden als Integer verwendet.
+Um Referenzpunkte im simulierten Raum zu haben, generiert diese Funktion drei virtuelle Raspberry-Pi-Geräte. Diese werden an den Grenzen des Raumes platziert:
 
-Dadurch können sowohl Zahlen als auch beliebige Textwerte, beispielsweise `testlauf-01`, als reproduzierbarer Seed verwendet werden.
+- Ursprung (`x_min`, `y_min`, Z=0)
+- X-Achse (`x_max`, `y_min`, Z=0)
+- Y-Achse (`x_min`, `y_max`, Z=0)
 
-##### `as_float`
+#### Validierung und Schnittstelle zur Weboberfläche (`parse_generation_parameters`)
 
-Diese Funktion prüft, ob ein Eingabewert in eine endliche Fließkommazahl umgewandelt werden kann.
+Diese Funktion fungiert als Bindeglied zwischen den Dash-Eingabefeldern und der Generierungslogik. Da Web-Formulare standardmäßig Strings zurückgeben, müssen alle Eingaben typsicher konvertiert und validiert werden.
 
-Ungültige, nicht numerische oder unendliche Werte führen zu einem `ValueError`.
+- **Typkonvertierung:** Die internen Helfer `as_float` und `as_integer` prüfen, ob die Eingaben gültige, endliche Zahlen sind.
+- **Grenzwertprüfung:** Alle Parameter werden gegen strikte Grenzen geprüft. Beispielsweise muss die Anzahl der Vögel zwischen 1 und 500 liegen, das Positionsrauschen zwischen 0 und 1, und die Richtungsänderung (`variance_angle`) zwischen 0 und 0.3.
+- **Logikprüfung:** Es wird sichergestellt, dass Mindestwerte nicht größer als Maximalwerte sind (z.B. `x_min` <= `x_max`).
 
-##### `as_integer`
-
-Diese Funktion verwendet zunächst `as_float` und prüft anschließend, ob der Wert eine ganze Zahl ist.
-
-Werte wie `4.0` sind zulässig, während Werte wie `4.5` zu einem `ValueError` führen.
-
-#### Validierung und Schnittstelle zur Benutzeroberfläche (`parse_generation_parameters`)
-
-Die Funktion `parse_generation_parameters` verarbeitet Eingaben aus einem Formular, prüft deren Datentypen und gibt ein Dictionary zurück, das direkt an `generate_birds` übergeben werden kann.
-
-Bei ungültigen Eingaben wird ein `ValueError` mit einer verständlichen Fehlermeldung ausgelöst.
-
-Für Feldlerchen gelten zusätzlich die Validierungsregeln von `generate_skylarks`. Insbesondere muss bei einer positiven Anzahl von Feldlerchen `z_max` größer als `z_min` sein.
-
-#### Parameter und Rückgabewert (`generate_birds`)
-
-| Parameter | Standardwert | Beschreibung |
-| --- | ---: | --- |
-| `number_of_birds` | – | Anzahl der gewöhnlichen Vögel. Über `parse_generation_parameters` sind Werte von 1 bis 500 zulässig. |
-| `time_interval` | – | Zeitlicher Abstand zwischen zwei Messungen in Sekunden. Der Wert bestimmt zugleich die Anzahl interner Bewegungsschritte je Messung. |
-| `sim_date` | – | `datetime`-Objekt, dessen Datum für die Simulation verwendet wird. Die Uhrzeit wird pro Vogel zufällig gesetzt. |
-| `x_min` | – | Untere Grenze der Ostkoordinate. |
-| `x_max` | – | Obere Grenze der Ostkoordinate. |
-| `y_min` | – | Untere Grenze der Nordkoordinate. |
-| `y_max` | – | Obere Grenze der Nordkoordinate. |
-| `z_min` | – | Untere Grenze der Höhe. |
-| `z_max` | – | Obere Grenze der Höhe. |
-| `min_speed` | – | Minimale horizontale Geschwindigkeit pro internem Bewegungsschritt. |
-| `max_speed` | – | Maximale horizontale Geschwindigkeit pro internem Bewegungsschritt. |
-| `position_noise` | – | Standardabweichung des finalen horizontalen Positionsrauschens für `enu_e` und `enu_n`. |
-| `seed_value` | `None` | Optionaler Seed für reproduzierbare Simulationen. Bei `None` wird der aktuelle Zeitstempel verwendet. |
-| `initial_spread` | – | Zusätzliche zufällige Verschiebung der horizontalen Startposition in X- und Y-Richtung. |
-| `variance_angle` | – | Standardabweichung der zufälligen Richtungsänderung pro internem Bewegungsschritt. |
-| `variance_speed` | – | Standardabweichung der zufälligen Geschwindigkeitsänderung pro internem Bewegungsschritt. |
-| `variance_z` | – | Standardabweichung des zusätzlichen vertikalen Rauschens pro internem Bewegungsschritt. |
-| `variance_vertical_speed` | – | Standardabweichung der Änderung der vertikalen Geschwindigkeit pro internem Bewegungsschritt. |
-| `number_of_larks` | `0` | Anzahl der zusätzlich zu generierenden Feldlerchen. |
-
-#### Validierungsregeln von `parse_generation_parameters`
-
-| Eingabe | Zulässige Werte bzw. Bedingung |
-| --- | --- |
-| `number_of_birds` | Ganze Zahl zwischen 1 und 500. |
-| `number_of_larks` | Ganze Zahl zwischen 0 und 500. |
-| `time_interval` | Ganze Zahl zwischen 1 und 60 Sekunden. |
-| `simulation_date_value` | Gültiges ISO-8601-Datum. |
-| `x_min`, `x_max` | `x_min` darf nicht größer als `x_max` sein. |
-| `y_min`, `y_max` | `y_min` darf nicht größer als `y_max` sein. |
-| `z_min`, `z_max` | `z_min` darf nicht größer als `z_max` sein. Für Feldlerchen muss `z_max` zusätzlich größer als `z_min` sein. |
-| `min_speed`, `max_speed` | `min_speed` darf nicht größer als `max_speed` sein. |
-| `initial_spread` | Wert zwischen 0 und 2000. |
-| `position_noise` | Wert zwischen 0 und 1. |
-| `variance_angle` | Wert zwischen 0 und 0.3. |
-| `variance_speed` | Wert zwischen 0 und 1. |
-| `variance_z` | Wert zwischen 0 und 1. |
-| `variance_vertical_speed` | Wert zwischen 0 und 0.1. |
-
-#### Struktur eines erzeugten Datensatzes
-
-| Feld                 | Beschreibung                                                                                                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `bird_id`            | Eindeutige Vogel-ID. Normale Vögel verwenden das Format `bird_XXXX`, Feldlerchen das Format `lark_XXXX`.                                                                             |
-| `timestamp`          | ISO-8601-Zeitstempel der Positionsmessung mit angehängtem `Z`.                                                                                                                       |
-| `enu_e`              | Simulierte Ostkoordinate, auf zwei Nachkommastellen gerundet.                                                                                                                        |
-| `enu_n`              | Simulierte Nordkoordinate, auf zwei Nachkommastellen gerundet.                                                                                                                       |
-| `enu_u`              | Simulierte Höhenkoordinate, auf zwei Nachkommastellen gerundet.                                                                                                                      |
-
+Sollte ein Wert ungültig sein, wirft die Funktion eine `ValueError`-Exception mit einer klaren Fehlermeldung, die in der Dash-Oberfläche abgefangen und dem Nutzer angezeigt werden kann. Bei erfolgreicher Prüfung wird ein typisiertes Dictionary zurückgegeben, das direkt an `generate_birds` übergeben wird.

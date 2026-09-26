@@ -45,3 +45,9 @@
 - Testen des Livesystems bzw. der Hardware
 - Implementierung und Dokumentation der 2D Bilder Erstellungs Simulation
 - Implementierung und Dokumentation der Triangulations Simulation
+
+## Jannick Ahlvers
+- Test des Versuchsaufbaus
+- Konzeption und Strukturierung der Simulations- und Analysepipeline
+- Erstellung der Pipeline Abbildungen
+- Aufarbeitung und Dokumentation des übernommenen Projektansatzes

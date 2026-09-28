@@ -51,3 +51,10 @@
 - Konzeption und Strukturierung der Simulations- und Analysepipeline
 - Erstellung der Pipeline Abbildungen
 - Aufarbeitung und Dokumentation des übernommenen Projektansatzes
+
+## Julian Penner
+- Testen des Versuchsaufbaus
+- Implementieren der Kartenfunktion für die Pis
+- Nestererkennung + Lokalisierung mit Google Maps
+- Flugprofil-Analyse jedes Vogels mit Graph und Eigenschaften
+- Dokumentation der genannten Änderungen

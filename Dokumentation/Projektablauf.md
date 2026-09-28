@@ -53,7 +53,7 @@
 - Aufarbeitung und Dokumentation des übernommenen Projektansatzes
 
 ## Julian Penner
-- Testen des Versuchsaufbaus
+- Test des Versuchsaufbaus
 - Implementieren der Kartenfunktion für die Pis
 - Nestererkennung + Lokalisierung mit Google Maps
 - Flugprofil-Analyse jedes Vogels mit Graph und Eigenschaften

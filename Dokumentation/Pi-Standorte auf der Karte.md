@@ -47,7 +47,7 @@ Plotly meldet Klicks ausschließlich auf Datenpunkten, nicht auf freier Kartenfl
 
 Technisch wird das Fadenkreuz nicht als Datenpunkt gezeichnet, sondern über `add_shape()` im **Papierkoordinatensystem** (`xref="paper"`, `yref="paper"`, Mittelpunkt `0.5 / 0.5`). Dadurch bleibt es beim Verschieben und Zoomen der Karte exakt mittig, statt mit der Karte mitzuwandern.
 
-![Tab „Kameras" mit Satellitenkarte, Fadenkreuz und Stationstabelle](pi-menue.PNG)
+![Tab „Kameras" mit Satellitenkarte, Fadenkreuz und Stationstabelle](Bilder/pi-menue.PNG)
 
 Im Bild sind alle Bestandteile zu sehen: die drei gesetzten Stationen als nummerierte farbige Marker, die türkisen Verbindungslinien von Pi 1 zu Pi 2 und Pi 3 (sie zeigen die X- und Y-Achse des aufgespannten ENU-Systems), das gelbe Fadenkreuz in der Kartenmitte, die vier Buttons und darunter die Stationstabelle mit den zusätzlichen Spalten **Breite** und **Länge**.
 
@@ -132,7 +132,7 @@ Zeile i > 0:      (x, y) = wgs84_to_enu(lat_i, lon_i, lat_0, lon_0)
 
 Die Werte werden auf zwei Nachkommastellen (Zentimeter) gerundet in die Spalten X und Y geschrieben. Die Statuszeile gibt zusätzlich die resultierenden Abstände zur ersten Station aus, damit sie sich mit tatsächlich gemessenen Abständen vergleichen lassen.
 
-![Kamerastationen und Sichtfelder im 3D-Modell](pi-positions.PNG)
+![Kamerastationen und Sichtfelder im 3D-Modell](Bilder/pi-positions.PNG)
 
 Im 3D-Modell erscheinen die Stationen anschließend an den umgerechneten Meterpositionen (rote Rauten), jeweils mit ihrer Blickrichtung und der daraus aufgespannten Kameraebene. Wird auf der Karte eine Station verschoben, ändern sich hier Position **und** Sichtfeld entsprechend — die Geometrie im Bild ist damit direkt das Ergebnis der Kartenplatzierung.
 

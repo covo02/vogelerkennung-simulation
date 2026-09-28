@@ -126,7 +126,7 @@ Je geschätztem Revier werden vier Elemente auf Bodenhöhe (`z = 0`) in die 3D-F
 | Wahres Nest | gelbes Kreuz | Ground Truth, nur in der Simulation vorhanden |
 | Abweichung | gelbe Verbindungslinie | Strecke zwischen Schätzung und Ground Truth, entspricht `error_m` |
 
-![Geschätzte Revierzentren im 3D-Plot](Nester-position.PNG)
+![Geschätzte Revierzentren im 3D-Plot](Bilder/Nester-position.PNG)
 
 Im Bild sind zwei Feldlerchen-Tracks zu sehen (die beiden Spiralen aus Steigflug, Kreisbahn und Sturzflug). Senkrecht darunter auf Bodenhöhe liegen die zugehörigen geschätzten Revierzentren mit ihren gestrichelten Revierkreisen — die Schätzung liegt jeweils unter dem Zentrum der geflogenen Kreisbahn, nicht unter der Bahn selbst.
 
@@ -327,7 +327,7 @@ Grund: Die Plateau-Definition ist rein **relativ** — sie teilt jeden Höhenver
 - Wurden keine Phasen erkannt, erscheint statt der Bänder der Hinweis „Kein auswertbarer Höhenwechsel (Hub X m < 15 m)".
 - Die Höhenachse erhält über `altitude_axis_range()` eine **Mindestspanne** von `MIN_ALTITUDE_AXIS_SPAN = 10 m`. Ohne sie würde Plotly ein flaches Profil auf wenige Zentimeter aufspreizen und reines Messrauschen wie ein Gebirge darstellen. Ein echter Singflug (50–120 m Hub) wird von der Mindestspanne nicht beeinflusst, weil dort die tatsächliche Spanne größer ist.
 
-![Track-Detail mit Höhenprofil, Merkmalen und Begründung](Flugprofill.PNG)
+![Track-Detail mit Höhenprofil, Merkmalen und Begründung](Bilder/Flugprofill.PNG)
 
 Im Bild ist `track_0033` zu sehen: Der Höhenverlauf steigt in rund 40 Sekunden auf etwa 120 m (grünes Band), hält diese Höhe über die Singflugphase (gelbes Band, 51 % der Trackdauer) und fällt am Ende wieder ab (rotes Band). Darunter stehen die extrahierten Merkmale und die einzelnen erfüllten Kriterien der Klassifikation.
 

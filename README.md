@@ -62,4 +62,4 @@ Die Applikation kann anschließend über http://localhost:8060 geöffnet werden.
 
 ## Weitere Informationen
 
-Weitere Informationen befinden sich im [Nutzerhandbuch](Dokumentation/Nutzerhandbuch_Simulation.pdf).
+Weitere Informationen befinden sich im [Nutzerhandbuch](Dokumentation/Nutzerhandbuch_Simulation.pdf) und dem [Dokumentationsordner](Dokumentation/).

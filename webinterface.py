@@ -67,7 +67,7 @@ from helper_functions.pi_map import (
 # ============================================================================
 # Testversion mit GeoJSON-Export. Läuft auf einem eigenen Port, damit sie
 # parallel zur unveränderten webinterface.py gestartet werden kann.
-APP_PORT = 8061
+APP_PORT = 8060
 
 # ============================================================================
 # GEOREFERENZ

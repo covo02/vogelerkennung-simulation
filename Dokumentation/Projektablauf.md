@@ -30,9 +30,9 @@
 # Arbeitsanteil
 
 ## Colin Voigt
-- Test des Versuchsaufbaus (2)
-- Implementierung der Vogelgenerierung (4, 5.1)
-- Implementierung des Greedy-Algorithmus zur Bestimmung der Flugbahnen (5.2)
+- Testen des Livesystems bzw. der Hardware
+- Implementierung der Vogelgenerierung und Feldlerchengenerierung
+- Implementierung des Greedy-Algorithmus zur Bestimmung der Flugbahnen
 
 ## Rokas Zilinskas
 - Testen des Livesystems bzw. der Hardware

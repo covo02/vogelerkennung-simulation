@@ -35,13 +35,13 @@
 - Implementierung des Greedy-Algorithmus zur Bestimmung der Flugbahnen
 - Dokumentation der Vogelgenerierung und Feldlerchen-Singflug-Generierung
 - Dokumentation des Greedy-Algorithmus
+- Dokumenation, von möglichen Integrationsszenarien des Greedy-Algorithmus in das Live-System mitsamt der Anforderungen.
 
 ## Rokas Zilinskas
 - Testen des Livesystems bzw. der Hardware
 - Codeanalyse und Dokumentation der Fehler
 - Implementierung des Algorithmus zur Erkennung/Klassifizierung von Feldlerchen
 - Erstellung des Nutzerhandbuchs
-
 
 ## Tim Reimer
 - Testen des Livesystems bzw. der Hardware

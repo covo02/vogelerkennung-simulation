@@ -58,7 +58,7 @@ Die Applikation kann anschließend über http://localhost:8060 geöffnet werden.
 
 ## Simulationsübersicht
 
-![Pipeline der Vogelerkennung](Dokumentation/Bilder/pipeline_abbildung_simulation.png)
+![Pipeline der Vogelerkennung](Dokumentation/markdown-code/Bilder/pipeline_abbildung_simulation.png)
 
 ## Weitere Informationen
 

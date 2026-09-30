@@ -31,8 +31,10 @@
 
 ## Colin Voigt
 - Testen des Livesystems bzw. der Hardware
-- Implementierung der Vogelgenerierung und Feldlerchengenerierung
+- Implementierung der Vogelgenerierung und Feldlerchen-Singflug-Generierung
 - Implementierung des Greedy-Algorithmus zur Bestimmung der Flugbahnen
+- Dokumentation der Vogelgenerierung und Feldlerchen-Singflug-Generierung
+- Dokumentation des Greedy-Algorithmus
 
 ## Rokas Zilinskas
 - Testen des Livesystems bzw. der Hardware

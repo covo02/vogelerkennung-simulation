@@ -1,3 +1,4 @@
+Colin Voigt
 ### Integration der Trajektorien-Ermittlung in das Livesystem
 
 Dieses Kapitel beschreibt, wie das Modul `trajectory.py` in ein Livesystem integriert werden kann. Ziel ist es, eingehende Positionsdaten zu sammeln, daraus eine gültige JSON-Datei zu erzeugen und anschließend die Trajektorien-Ermittlung auszuführen.
@@ -91,9 +92,10 @@ Beispielhaft kann eine fortlaufend aufgebaute JSON-Struktur wie folgt aussehen:
     }
   ]
 }
+```
 
 Wichtig ist, dass die JSON-Datei während der Sammlung syntaktisch gültig gespeichert wird. Bei vielen Events oder längeren Laufzeiten kann alternativ eine Datenbank oder ein Event-Log verwendet werden. Vor der Berechnung werden die gesammelten Datensätze dann in das erwartete JSON-Format exportiert.
-```
+
 ---
 
 #### Zeitpunkt der Ausführung

@@ -1,3 +1,4 @@
+Colin Voigt
 ### Dokumentation der Flugbahn-Zuordnung
 
 Dieses Kapitel beschreibt die Funktionsweise des Moduls `trajectory.py`. Das Modul dient der Ermittlung von Flugbahnen (Trajektorien) aus einer Reihe von Zeitstempeln und ENU-Koordinaten. Dabei berechnet das Modul durch Bewegungsvorhersagen und Distanzprüfungen zusammenhängende Tracks und weist jeder Beobachtung eine `determined_track_id` zu.

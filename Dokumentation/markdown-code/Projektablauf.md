@@ -30,16 +30,18 @@
 # Arbeitsanteil
 
 ## Colin Voigt
-- Test des Versuchsaufbaus (2)
-- Implementierung der Vogelgenerierung (4, 5.1)
-- Implementierung des Greedy-Algorithmus zur Bestimmung der Flugbahnen (5.2)
+- Testen des Livesystems bzw. der Hardware
+- Implementierung der Vogelgenerierung und Feldlerchen-Singflug-Generierung
+- Implementierung des Greedy-Algorithmus zur Bestimmung der Flugbahnen
+- Dokumentation der Vogelgenerierung und Feldlerchen-Singflug-Generierung
+- Dokumentation des Greedy-Algorithmus
+- Dokumenation, von möglichen Integrationsszenarien des Greedy-Algorithmus in das Live-System mitsamt der Anforderungen.
 
 ## Rokas Zilinskas
 - Testen des Livesystems bzw. der Hardware
 - Codeanalyse und Dokumentation der Fehler
 - Implementierung des Algorithmus zur Erkennung/Klassifizierung von Feldlerchen
 - Erstellung des Nutzerhandbuchs
-
 
 ## Tim Reimer
 - Testen des Livesystems bzw. der Hardware
@@ -51,3 +53,10 @@
 - Konzeption und Strukturierung der Simulations- und Analysepipeline
 - Erstellung der Pipeline Abbildungen
 - Aufarbeitung und Dokumentation des übernommenen Projektansatzes
+
+## Julian Penner
+- Test des Versuchsaufbaus
+- Implementieren der Kartenfunktion für die Pis
+- Nestererkennung + Lokalisierung mit Google Maps
+- Flugprofil-Analyse jedes Vogels mit Graph und Eigenschaften
+- Dokumentation der genannten Änderungen

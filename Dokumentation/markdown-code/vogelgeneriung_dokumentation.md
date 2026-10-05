@@ -1,3 +1,4 @@
+Colin Voigt
 ### Dokumentation der Vogelflugbahn-Generierung
 
 Dieses Kapitel beschreibt das Modul `bird_generation.py`. Es erzeugt simulierte Flugbahnen für allgemeine Vögel und kann zusätzlich Flugbahnen von Feldlerchen über die Funktion `generate_skylarks` aus `helper_functions/skylark_generation.py` ergänzen.

@@ -1,3 +1,4 @@
+Colin Voigt
 ### Dokumentation der Feldlerchen-Singflug-Generierung
 
 Dieses Kapitel beschreibt die Funktion `generate_skylarks` aus dem Modul `skylark_generation.py`. Die Funktion erzeugt simulierte ENU-Positionsdaten für Feldlerchen (`lark_XXXX`), die typische Singflüge um ein Revier- bzw. Nestzentrum ausführen.

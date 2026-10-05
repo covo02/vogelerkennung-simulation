@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 
 
-INPUT_FILE = "vogel_flugbahnen.json"
+INPUT_FILE = "vogel_position_erkannt.json"
 OUTPUT_FILE = "vogel_flugbahnen_determined.json"
 
 # Parameter: an reale Messdaten und Koordinateneinheit anpassen
@@ -93,6 +93,45 @@ class Track:
 
         self.last_ts = observation.timestamp
         self.last_pos = new_pos
+
+
+def load_input_records(path: str = INPUT_FILE) -> List[dict]:
+    """Lädt die 3D-Punkte aus der erkannten Positionsdatei."""
+    with open(path, "r", encoding="utf-8") as file:
+        payload = json.load(file)
+
+    overlaps = payload.get("overlaps", [])
+    if isinstance(overlaps, list) and overlaps:
+        records: List[dict] = []
+        for overlap in overlaps:
+            point = overlap.get("point", {})
+            if not isinstance(point, dict):
+                continue
+
+            timestamp = overlap.get("timestamp")
+            if not timestamp:
+                continue
+
+            records.append(
+                {
+                    "timestamp": timestamp,
+                    "enu_e": float(point.get("x", 0.0)),
+                    "enu_n": float(point.get("y", 0.0)),
+                    "enu_u": float(point.get("z", 0.0)),
+                }
+            )
+
+        if records:
+            return records
+
+    legacy_records = payload.get("simulated_birds", [])
+    if isinstance(legacy_records, list) and legacy_records:
+        return legacy_records
+
+    raise ValueError(
+        "Keine 3D-Punkte in der erkannten Positionsdatei gefunden. "
+        "Erwartet ein Feld 'overlaps' mit 'point'."
+    )
 
 
 def load_observations(records: List[dict]) -> List[Observation]:
@@ -202,15 +241,12 @@ def determine_tracks(records: List[dict]) -> List[dict]:
 
 
 def main() -> None:
-    with open(INPUT_FILE, "r", encoding="utf-8") as file:
-        payload = json.load(file)
-
-    records = payload.get("simulated_birds", [])
+    records = load_input_records(INPUT_FILE)
 
     if not records:
         raise ValueError(
             "Keine Beobachtungen gefunden. "
-            "Die Eingabedatei muss ein Feld 'observations' enthalten."
+            "Die Eingabedatei muss ein Feld 'overlaps' mit 3D-Punkten enthalten."
         )
 
     determined_records = determine_tracks(records)

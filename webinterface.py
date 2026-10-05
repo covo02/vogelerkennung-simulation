@@ -766,8 +766,15 @@ def build_figure(
     if show_detected_vectors_only:
         add_detected_vectors_to_figure(fig, detected_vectors_payload)
     elif trajectory_df is not None:
-        if group_by_bird:
-            for bird_id, group in trajectory_df.groupby(group_column, sort=False):
+        group_label_column = group_column if group_column in trajectory_df.columns else None
+        if group_label_column is None:
+            for candidate in ("determined_track_id", "bird_id", "track_id"):
+                if candidate in trajectory_df.columns:
+                    group_label_column = candidate
+                    break
+
+        if group_by_bird and group_label_column is not None:
+            for bird_id, group in trajectory_df.groupby(group_label_column, sort=False):
                 is_visible = True
                 if track_visibility is not None:
                     is_visible = track_visibility.get(str(bird_id), True)
@@ -817,6 +824,16 @@ def build_figure(
                         )
                     )
         else:
+            label_column = group_label_column or "bird_id"
+            if label_column not in trajectory_df.columns:
+                label_column = "determined_track_id" if "determined_track_id" in trajectory_df.columns else "index"
+
+            text_values = (
+                trajectory_df[label_column].astype(str)
+                if label_column != "index"
+                else trajectory_df.index.astype(str)
+            )
+
             fig.add_trace(
                 go.Scatter3d(
                     x=trajectory_df["enu_e"],
@@ -825,7 +842,7 @@ def build_figure(
                     mode="markers",
                     marker=dict(symbol="circle", size=4, color="#60a5fa"),
                     name="Vogelpositionen",
-                    text=trajectory_df["bird_id"].astype(str),
+                    text=text_values,
                     hovertemplate=(
                         "<b>Vogel</b>: %{text}<br>"
                         "X: %{x}<br>"
